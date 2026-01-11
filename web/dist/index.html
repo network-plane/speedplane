@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>speedplane – Speedtest Tracker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="app">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="app-title">Speedtest Tracker</div>
+      </div>
+      <nav class="sidebar-nav">
+        <button class="nav-item nav-item-active" data-view="dashboard">Dashboard</button>
+        <button class="nav-item" data-view="history">Results</button>
+        <button class="nav-item" data-view="preferences">Preferences</button>
+      </nav>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Links</div>
+        <a class="nav-link" href="https://github.com" target="_blank" rel="noreferrer">GitHub</a>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <h1 class="topbar-title">Dashboard</h1>
+        <div class="topbar-right">
+          <button id="run-now-btn" class="btn-primary">Run speedtest now</button>
+        </div>
+      </header>
+
+      <section id="view-dashboard" class="view view-active">
+        <div class="cards-row">
+          <div class="card">
+            <div class="card-label">Latest download</div>
+            <div id="latest-download-value" class="card-value">–</div>
+            <div id="latest-download-sub" class="card-sub">Mbps</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Latest upload</div>
+            <div id="latest-upload-value" class="card-value">–</div>
+            <div id="latest-upload-sub" class="card-sub">Mbps</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Latest ping</div>
+            <div id="latest-ping-value" class="card-value">–</div>
+            <div id="latest-ping-sub" class="card-sub">ms</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Latest jitter</div>
+            <div id="latest-jitter-value" class="card-value">–</div>
+            <div id="latest-jitter-sub" class="card-sub">ms</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Latest packet loss</div>
+            <div id="latest-packetloss-value" class="card-value">–</div>
+            <div id="latest-packetloss-sub" class="card-sub">%</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Download (Mbps)</div>
+            <select id="range-download" class="select">
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+          </div>
+          <div class="chart" id="download-chart"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Upload (Mbps)</div>
+            <select id="range-upload" class="select">
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+          </div>
+          <div class="chart" id="upload-chart"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Latency (ms)</div>
+            <select id="range-latency" class="select">
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+          </div>
+          <div class="chart" id="latency-chart"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Jitter (ms)</div>
+            <select id="range-jitter" class="select">
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+          </div>
+          <div class="chart" id="jitter-chart"></div>
+        </div>
+      </section>
+
+      <section id="view-history" class="view">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Results</div>
+          </div>
+          <table class="table" id="history-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Date/time</th>
+                <th>Download (Mbps)</th>
+                <th>Upload (Mbps)</th>
+                <th>Ping (ms)</th>
+                <th>Jitter (ms)</th>
+                <th>Packet Loss (%)</th>
+                <th>IP Address</th>
+                <th>ISP</th>
+                <th>Server</th>
+              </tr>
+            </thead>
+            <tbody>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="view-preferences" class="view">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Schedules</div>
+          </div>
+          <div id="schedules-list"></div>
+
+          <form id="schedule-form" class="form">
+            <input type="hidden" id="schedule-form-id" name="id" />
+            <div class="form-row">
+              <label>Name</label>
+              <input type="text" id="schedule-form-name" name="name" />
+            </div>
+            <div class="form-row">
+              <label>Type</label>
+              <select id="schedule-form-type" name="type">
+                <option value="interval">Interval</option>
+                <option value="daily">Daily</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Every (for interval)</label>
+              <input type="text" id="schedule-form-every" name="every" placeholder="1h, 30m, 6h" />
+            </div>
+            <div class="form-row">
+              <label>Time of day (for daily)</label>
+              <input type="text" id="schedule-form-timeOfDay" name="timeOfDay" placeholder="14:30" />
+            </div>
+            <div class="form-row">
+              <label>Enabled</label>
+              <input type="checkbox" id="schedule-form-enabled" name="enabled" checked />
+            </div>
+            <button type="submit" class="btn-primary" id="schedule-form-submit">Add schedule</button>
+            <button type="button" class="btn-secondary" id="schedule-form-cancel" style="display: none;">Cancel</button>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
