@@ -42,5 +42,5 @@ schedules.json
 homepage/
 
 # Frontend build artifacts
-web/dist/main.js
-web/dist/main.js.map
+
+web/dist/
