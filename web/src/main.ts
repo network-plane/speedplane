@@ -421,7 +421,8 @@ async function loadSchedules(): Promise<void> {
       ($("schedule-form-every") as HTMLInputElement).value = s.every || "";
       ($("schedule-form-timeOfDay") as HTMLInputElement).value = s.time_of_day || "";
       ($("schedule-form-enabled") as HTMLInputElement).checked = s.enabled;
-      ($("schedule-form-submit") as HTMLButtonElement).textContent = "Update schedule";
+      ($("schedule-form-submit") as HTMLButtonElement).textContent = "Update";
+      toggleScheduleFields(s.type);
       ($("schedule-form-cancel") as HTMLButtonElement).style.display = "inline-block";
       // Scroll to form
       document.getElementById("schedule-form")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -438,9 +439,13 @@ async function loadSchedules(): Promise<void> {
         await fetchJSON(`/api/schedules/${s.id}`, {
           method: "DELETE",
         });
+        // Remove the card immediately for better UX
+        card.remove();
+        // Also reload to ensure consistency
         await loadSchedules();
       } catch (err) {
         console.error("delete schedule failed", err);
+        alert("Failed to delete schedule. Please refresh the page.");
       }
     });
 
@@ -530,9 +535,30 @@ function setupRunNow(): void {
 
 /* ---------- SCHEDULE FORM ---------- */
 
+function toggleScheduleFields(type: string): void {
+  const everyField = document.getElementById("schedule-form-every-field");
+  const timeOfDayField = document.getElementById("schedule-form-timeOfDay-field");
+
+  if (type === "interval") {
+    if (everyField) everyField.style.display = "";
+    if (timeOfDayField) timeOfDayField.style.display = "none";
+  } else if (type === "daily") {
+    if (everyField) everyField.style.display = "none";
+    if (timeOfDayField) timeOfDayField.style.display = "";
+  }
+}
+
 function setupScheduleForm(): void {
   const form = document.getElementById("schedule-form") as HTMLFormElement | null;
   if (!form) return;
+
+  const typeSelect = $("schedule-form-type") as HTMLSelectElement;
+  typeSelect.addEventListener("change", () => {
+    toggleScheduleFields(typeSelect.value);
+  });
+
+  // Initialize fields based on default type
+  toggleScheduleFields(typeSelect.value);
 
   const cancelBtn = $("schedule-form-cancel") as HTMLButtonElement;
   cancelBtn.addEventListener("click", () => {
@@ -540,8 +566,9 @@ function setupScheduleForm(): void {
     form.reset();
     ($("schedule-form-id") as HTMLInputElement).value = "";
     ($("schedule-form-enabled") as HTMLInputElement).checked = true;
-    ($("schedule-form-submit") as HTMLButtonElement).textContent = "Add schedule";
+    ($("schedule-form-submit") as HTMLButtonElement).textContent = "Add";
     cancelBtn.style.display = "none";
+    toggleScheduleFields(typeSelect.value);
   });
 
   form.addEventListener("submit", async (ev) => {
@@ -574,7 +601,7 @@ function setupScheduleForm(): void {
       form.reset();
       ($("schedule-form-id") as HTMLInputElement).value = "";
       ($("schedule-form-enabled") as HTMLInputElement).checked = true;
-      ($("schedule-form-submit") as HTMLButtonElement).textContent = "Add schedule";
+      ($("schedule-form-submit") as HTMLButtonElement).textContent = "Add";
       cancelBtn.style.display = "none";
       editingScheduleId = null;
       await loadSchedules();

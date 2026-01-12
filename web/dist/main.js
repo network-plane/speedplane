@@ -299,7 +299,8 @@
         $("schedule-form-every").value = s.every || "";
         $("schedule-form-timeOfDay").value = s.time_of_day || "";
         $("schedule-form-enabled").checked = s.enabled;
-        $("schedule-form-submit").textContent = "Update schedule";
+        $("schedule-form-submit").textContent = "Update";
+        toggleScheduleFields(s.type);
         $("schedule-form-cancel").style.display = "inline-block";
         document.getElementById("schedule-form")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       });
@@ -383,17 +384,34 @@
       }
     });
   }
+  function toggleScheduleFields(type) {
+    const everyField = document.getElementById("schedule-form-every-field");
+    const timeOfDayField = document.getElementById("schedule-form-timeOfDay-field");
+    if (type === "interval") {
+      if (everyField) everyField.style.display = "";
+      if (timeOfDayField) timeOfDayField.style.display = "none";
+    } else if (type === "daily") {
+      if (everyField) everyField.style.display = "none";
+      if (timeOfDayField) timeOfDayField.style.display = "";
+    }
+  }
   function setupScheduleForm() {
     const form = document.getElementById("schedule-form");
     if (!form) return;
+    const typeSelect = $("schedule-form-type");
+    typeSelect.addEventListener("change", () => {
+      toggleScheduleFields(typeSelect.value);
+    });
+    toggleScheduleFields(typeSelect.value);
     const cancelBtn = $("schedule-form-cancel");
     cancelBtn.addEventListener("click", () => {
       editingScheduleId = null;
       form.reset();
       $("schedule-form-id").value = "";
       $("schedule-form-enabled").checked = true;
-      $("schedule-form-submit").textContent = "Add schedule";
+      $("schedule-form-submit").textContent = "Add";
       cancelBtn.style.display = "none";
+      toggleScheduleFields(typeSelect.value);
     });
     form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
@@ -421,7 +439,7 @@
         form.reset();
         $("schedule-form-id").value = "";
         $("schedule-form-enabled").checked = true;
-        $("schedule-form-submit").textContent = "Add schedule";
+        $("schedule-form-submit").textContent = "Add";
         cancelBtn.style.display = "none";
         editingScheduleId = null;
         await loadSchedules();

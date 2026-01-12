@@ -193,15 +193,17 @@
             <div class="panel-title">Appearance</div>
           </div>
           <div class="form">
-            <div class="form-row">
-              <label>Theme</label>
-              <select id="pref-template">
-                {{range .TemplatesList}}<option value="{{.}}">{{.}}</option>{{end}}
-              </select>
-            </div>
-            <div class="form-row">
-              <label>Color Scheme</label>
-              <select id="pref-scheme"></select>
+            <div class="form-row form-row-inline">
+              <div class="form-field">
+                <label>Theme</label>
+                <select id="pref-template">
+                  {{range .TemplatesList}}<option value="{{.}}">{{.}}</option>{{end}}
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Color Scheme</label>
+                <select id="pref-scheme"></select>
+              </div>
             </div>
           </div>
         </div>
@@ -214,30 +216,35 @@
 
           <form id="schedule-form" class="form">
             <input type="hidden" id="schedule-form-id" name="id" />
-            <div class="form-row">
-              <label>Name</label>
-              <input type="text" id="schedule-form-name" name="name" />
+            <div class="form-row form-row-inline">
+              <div class="form-field">
+                <label>Name</label>
+                <input type="text" id="schedule-form-name" name="name" />
+              </div>
+              <div class="form-field">
+                <label>Type</label>
+                <select id="schedule-form-type" name="type">
+                  <option value="interval">Interval</option>
+                  <option value="daily">Daily</option>
+                </select>
+              </div>
+              <div class="form-field" id="schedule-form-every-field" style="display: none;">
+                <label>Every</label>
+                <input type="text" id="schedule-form-every" name="every" placeholder="1h, 30m, 6h" />
+              </div>
+              <div class="form-field" id="schedule-form-timeOfDay-field" style="display: none;">
+                <label>Time of day</label>
+                <input type="text" id="schedule-form-timeOfDay" name="timeOfDay" placeholder="14:30" />
+              </div>
+              <div class="form-field">
+                <label>Enabled</label>
+                <input type="checkbox" id="schedule-form-enabled" name="enabled" checked />
+              </div>
+              <div class="form-field">
+                <label>&nbsp;</label>
+                <button type="submit" class="btn" id="schedule-form-submit">Add</button>
+              </div>
             </div>
-            <div class="form-row">
-              <label>Type</label>
-              <select id="schedule-form-type" name="type">
-                <option value="interval">Interval</option>
-                <option value="daily">Daily</option>
-              </select>
-            </div>
-            <div class="form-row">
-              <label>Every (for interval)</label>
-              <input type="text" id="schedule-form-every" name="every" placeholder="1h, 30m, 6h" />
-            </div>
-            <div class="form-row">
-              <label>Time of day (for daily)</label>
-              <input type="text" id="schedule-form-timeOfDay" name="timeOfDay" placeholder="14:30" />
-            </div>
-            <div class="form-row">
-              <label>Enabled</label>
-              <input type="checkbox" id="schedule-form-enabled" name="enabled" checked />
-            </div>
-            <button type="submit" class="btn" id="schedule-form-submit">Add schedule</button>
             <button type="button" class="btn" id="schedule-form-cancel" style="display: none;">Cancel</button>
           </form>
         </div>
