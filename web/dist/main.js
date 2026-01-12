@@ -1128,20 +1128,60 @@
       const statusEl = modal.querySelector(".progress-status");
       const messageEl = modal.querySelector(".progress-message");
       try {
+        const detailsEl = modal.querySelector(".progress-details");
+        const userInfoEl = modal.querySelector("#progress-user-info");
+        const serverInfoEl = modal.querySelector("#progress-server-info");
+        const pingInfoEl = modal.querySelector("#progress-ping-info");
+        const downloadInfoEl = modal.querySelector("#progress-download-info");
+        const uploadInfoEl = modal.querySelector("#progress-upload-info");
         const result = await runSpeedtestWithProgress((stage, message) => {
           if (statusEl) statusEl.textContent = stage;
           if (messageEl) messageEl.textContent = message;
           btn.textContent = message;
+          if (stage === "user" && message.includes("Connected from")) {
+            const match = message.match(/Connected from (.+?) \((.+?)\)/);
+            if (match) {
+              userInfoEl.innerHTML = `<strong>IP:</strong> ${match[1]} | <strong>ISP:</strong> ${match[2]}`;
+              userInfoEl.style.display = "block";
+            }
+          } else if (stage === "servers" && message.includes("Selected server")) {
+            const match = message.match(/Selected server: (.+?)$/);
+            if (match) {
+              serverInfoEl.innerHTML = `<strong>Server:</strong> ${match[1]}`;
+              serverInfoEl.style.display = "block";
+            }
+          } else if (stage === "ping" && message.includes("Ping:")) {
+            const match = message.match(/Ping: (.+?) ms, Jitter: (.+?) ms/);
+            if (match) {
+              pingInfoEl.innerHTML = `<strong>Ping:</strong> ${match[1]} ms | <strong>Jitter:</strong> ${match[2]} ms`;
+              pingInfoEl.style.display = "block";
+            }
+          } else if (stage === "download" && message.includes("Download:")) {
+            const match = message.match(/Download: (.+?) Mbps/);
+            if (match) {
+              downloadInfoEl.innerHTML = `<strong>Download Speed:</strong> <span style="color: #4a9eff; font-weight: bold;">${match[1]} Mbps</span>`;
+              downloadInfoEl.style.display = "block";
+            }
+          } else if (stage === "upload" && message.includes("Upload:")) {
+            const match = message.match(/Upload: (.+?) Mbps/);
+            if (match) {
+              uploadInfoEl.innerHTML = `<strong>Upload Speed:</strong> <span style="color: #4a9eff; font-weight: bold;">${match[1]} Mbps</span>`;
+              uploadInfoEl.style.display = "block";
+            }
+          }
         });
         closeProgressModal(modal);
-        await Promise.all([
-          loadSummary(),
-          loadHistoryTable(),
-          updateDownloadChart(),
-          updateUploadChart(),
-          updateLatencyChart(),
-          updateJitterChart()
-        ]);
+        const saved = await showResultsModal(result);
+        if (saved) {
+          await Promise.all([
+            loadSummary(),
+            loadHistoryTable(),
+            updateDownloadChart(),
+            updateUploadChart(),
+            updateLatencyChart(),
+            updateJitterChart()
+          ]);
+        }
       } catch (err) {
         console.error("run-now failed", err);
         closeProgressModal(modal);
@@ -1156,14 +1196,21 @@
     const modal = document.createElement("div");
     modal.className = "progress-modal-overlay";
     modal.innerHTML = `
-    <div class="progress-modal">
+    <div class="progress-modal" style="max-width: 500px;">
       <div class="progress-header">
         <h3>Running Speedtest</h3>
       </div>
-      <div class="progress-content">
-        <div class="progress-spinner"></div>
-        <div class="progress-status"></div>
-        <div class="progress-message"></div>
+      <div class="progress-content" style="padding: 20px;">
+        <div class="progress-spinner" style="margin-bottom: 20px;"></div>
+        <div class="progress-status" style="font-size: 14px; font-weight: bold; margin-bottom: 8px; text-transform: capitalize;"></div>
+        <div class="progress-message" style="font-size: 13px; color: #aaa; margin-bottom: 16px;"></div>
+        <div class="progress-details" style="border-top: 1px solid #333; padding-top: 16px; margin-top: 16px; font-size: 12px; color: #888;">
+          <div id="progress-user-info" style="display: none; margin-bottom: 8px;"></div>
+          <div id="progress-server-info" style="display: none; margin-bottom: 8px;"></div>
+          <div id="progress-ping-info" style="display: none; margin-bottom: 8px;"></div>
+          <div id="progress-download-info" style="display: none; margin-bottom: 8px;"></div>
+          <div id="progress-upload-info" style="display: none; margin-bottom: 8px;"></div>
+        </div>
       </div>
     </div>
   `;
@@ -1174,6 +1221,113 @@
     if (modal && modal.parentNode) {
       modal.parentNode.removeChild(modal);
     }
+  }
+  function showResultsModal(result) {
+    return new Promise((resolve) => {
+      const modal = document.createElement("div");
+      modal.className = "progress-modal-overlay";
+      const serverInfo = result.server_name ? `${result.server_name}${result.server_country ? ` (${result.server_country})` : ""}${result.server_id ? ` [${result.server_id}]` : ""}` : result.server_id || "\u2013";
+      modal.innerHTML = `
+      <div class="progress-modal" style="max-width: 600px;">
+        <div class="progress-header">
+          <h3>Speedtest Results</h3>
+        </div>
+        <div class="progress-content" style="padding: 20px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+            <div>
+              <div style="font-size: 12px; color: #888; margin-bottom: 4px;">Download</div>
+              <div style="font-size: 24px; font-weight: bold;">${formatNumber(result.download_mbps)} <span style="font-size: 14px; font-weight: normal;">Mbps</span></div>
+            </div>
+            <div>
+              <div style="font-size: 12px; color: #888; margin-bottom: 4px;">Upload</div>
+              <div style="font-size: 24px; font-weight: bold;">${formatNumber(result.upload_mbps)} <span style="font-size: 14px; font-weight: normal;">Mbps</span></div>
+            </div>
+            <div>
+              <div style="font-size: 12px; color: #888; margin-bottom: 4px;">Ping</div>
+              <div style="font-size: 20px; font-weight: bold;">${formatNumber(result.ping_ms, 1)} <span style="font-size: 14px; font-weight: normal;">ms</span></div>
+            </div>
+            <div>
+              <div style="font-size: 12px; color: #888; margin-bottom: 4px;">Jitter</div>
+              <div style="font-size: 20px; font-weight: bold;">${formatNumber(result.jitter_ms ?? 0, 1)} <span style="font-size: 14px; font-weight: normal;">ms</span></div>
+            </div>
+          </div>
+
+          ${result.packet_loss_pct != null && result.packet_loss_pct >= 0 ? `
+            <div style="margin-bottom: 16px;">
+              <div style="font-size: 12px; color: #888; margin-bottom: 4px;">Packet Loss</div>
+              <div style="font-size: 18px;">${formatNumber(result.packet_loss_pct, 2)}%</div>
+            </div>
+          ` : ""}
+
+          <div style="border-top: 1px solid #333; padding-top: 16px; margin-top: 16px;">
+            <div style="margin-bottom: 8px;">
+              <span style="font-size: 12px; color: #888;">Timestamp:</span>
+              <span style="margin-left: 8px;">${formatDateTime(new Date(result.timestamp))}</span>
+            </div>
+            ${result.isp ? `
+              <div style="margin-bottom: 8px;">
+                <span style="font-size: 12px; color: #888;">ISP:</span>
+                <span style="margin-left: 8px;">${result.isp}</span>
+              </div>
+            ` : ""}
+            ${result.external_ip ? `
+              <div style="margin-bottom: 8px;">
+                <span style="font-size: 12px; color: #888;">External IP:</span>
+                <span style="margin-left: 8px; font-family: monospace;">${result.external_ip}</span>
+              </div>
+            ` : ""}
+            <div style="margin-bottom: 8px;">
+              <span style="font-size: 12px; color: #888;">Server:</span>
+              <span style="margin-left: 8px;">${serverInfo}</span>
+            </div>
+            <div style="margin-bottom: 8px;">
+              <span style="font-size: 12px; color: #888;">ID:</span>
+              <span style="margin-left: 8px; font-family: monospace; font-size: 11px;">${result.id}</span>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; padding-top: 16px; border-top: 1px solid #333;">
+            <button id="results-modal-ok" style="padding: 8px 16px; cursor: pointer;">OK</button>
+            <button id="results-modal-save" style="padding: 8px 16px; cursor: pointer; background: #4a9eff; color: white; border: none;">Save</button>
+          </div>
+        </div>
+      </div>
+    `;
+      document.body.appendChild(modal);
+      const handleClose = (saved) => {
+        if (modal && modal.parentNode) {
+          modal.parentNode.removeChild(modal);
+        }
+        resolve(saved);
+      };
+      const okBtn = modal.querySelector("#results-modal-ok");
+      okBtn.addEventListener("click", () => handleClose(false));
+      const saveBtn = modal.querySelector("#results-modal-save");
+      saveBtn.addEventListener("click", async () => {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Saving...";
+        try {
+          await fetchJSON("/api/results", {
+            method: "POST",
+            body: JSON.stringify(result)
+          });
+          handleClose(true);
+        } catch (err) {
+          console.error("Failed to save result:", err);
+          alert("Failed to save result. Please try again.");
+          saveBtn.disabled = false;
+          saveBtn.textContent = "Save";
+        }
+      });
+      const escHandler = (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          document.removeEventListener("keydown", escHandler);
+          handleClose(false);
+        }
+      };
+      document.addEventListener("keydown", escHandler);
+    });
   }
   async function runSpeedtestWithProgress(onProgress) {
     return new Promise((resolve, reject) => {
@@ -1524,6 +1678,29 @@
       }
     }
   }
+  function setupSaveManualRunsPreference() {
+    const checkbox = $("pref-save-manual-runs");
+    fetchJSON("/api/preferences").then((data) => {
+      checkbox.checked = data.save_manual_runs;
+    }).catch((err) => {
+      console.error("Failed to load save manual runs preference:", err);
+      checkbox.checked = false;
+    });
+    checkbox.addEventListener("change", async () => {
+      try {
+        await fetchJSON("/api/preferences", {
+          method: "PUT",
+          body: JSON.stringify({
+            save_manual_runs: checkbox.checked
+          })
+        });
+      } catch (err) {
+        console.error("Failed to save save manual runs preference:", err);
+        alert("Failed to save preference. Please try again.");
+        checkbox.checked = !checkbox.checked;
+      }
+    });
+  }
   var scheduleTimerInterval = null;
   var nextRunTime = null;
   var intervalDuration = null;
@@ -1646,6 +1823,7 @@
     setupRangeSelectors();
     setupThemeSelection();
     setupCombinedGraphPreference();
+    setupSaveManualRunsPreference();
     startScheduleTimer();
     connectWebSocket();
     const isCombinedGraph = localStorage.getItem("combined-graph") === "true";

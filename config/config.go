@@ -16,6 +16,7 @@ type Config struct {
     DBPath          string                    `json:"db_path"`
     ListenAddr      string                    `json:"listen_addr"`
     PublicDashboard bool                      `json:"public_dashboard"`
+    SaveManualRuns  bool                      `json:"save_manual_runs"`
     Schedules       []model.Schedule          `json:"schedules,omitempty"`
     LastRun         map[string]time.Time      `json:"last_run,omitempty"`
 }
@@ -27,6 +28,7 @@ func Default() Config {
         DBPath:          "", // Empty means use {data_dir}/speedplane.results
         ListenAddr:       ":8080",
         PublicDashboard: false,
+        SaveManualRuns:  false, // Manual runs don't save to database by default
         Schedules:       nil,
         LastRun:         make(map[string]time.Time),
     }

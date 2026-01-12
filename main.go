@@ -12,11 +12,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"syscall"
-	"time"
-
-	"github.com/spf13/cobra"
-
 	"speedplane/api"
 	"speedplane/config"
 	"speedplane/model"
@@ -24,6 +19,10 @@ import (
 	"speedplane/speedtest"
 	"speedplane/storage"
 	"speedplane/theme"
+	"syscall"
+	"time"
+
+	"github.com/spf13/cobra"
 )
 
 //go:embed templates
@@ -38,7 +37,7 @@ var (
 	listen     string
 	listenPort int
 	public     bool
-	appVersion = "0.1.22"
+	appVersion = "0.1.28"
 )
 
 var rootCmd = &cobra.Command{
@@ -140,6 +139,11 @@ func run(cmd *cobra.Command, args []string) {
 		return res, nil
 	}
 
+	// Run without saving (for manual runs when SaveManualRuns is false)
+	runWithoutSave := func(ctx context.Context) (*model.SpeedtestResult, error) {
+		return runner.Run(ctx)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -171,19 +175,23 @@ func run(cmd *cobra.Command, args []string) {
 
 	mux := http.NewServeMux()
 
-	// Create progress-enabled runner
-	runWithProgress := func(ctx context.Context, progress func(stage string, message string)) (*model.SpeedtestResult, error) {
-		res, err := runner.RunWithProgress(ctx, progress)
-		if err != nil {
-			return nil, err
-		}
-		if err := store.SaveResult(res); err != nil {
-			return nil, err
-		}
-		return res, nil
+	// Create progress-enabled runner that doesn't save (for manual runs when SaveManualRuns is false)
+	runWithProgressWithoutSave := func(ctx context.Context, progress func(stage string, message string)) (*model.SpeedtestResult, error) {
+		return runner.RunWithProgress(ctx, progress)
 	}
 
-	apiServer := api.NewServer(store, runAndSave, runWithProgress, sched, saveConfig)
+	// Getter function for SaveManualRuns preference
+	getSaveManualRuns := func() bool {
+		return cfg.SaveManualRuns
+	}
+
+	// Setter function for SaveManualRuns preference
+	setSaveManualRuns := func(value bool) error {
+		cfg.SaveManualRuns = value
+		return config.Save(cfg)
+	}
+
+	apiServer := api.NewServer(store, runWithoutSave, runWithProgressWithoutSave, sched, saveConfig, getSaveManualRuns, setSaveManualRuns)
 
 	// Broadcast when scheduled speedtests complete
 	sched.SetOnComplete(func(result *model.SpeedtestResult) {

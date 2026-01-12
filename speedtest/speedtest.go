@@ -47,6 +47,7 @@ func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string
 	if err != nil {
 		return nil, fmt.Errorf("fetch user info: %w", err)
 	}
+	progress("user", fmt.Sprintf("Connected from %s (%s)", user.IP, user.Isp))
 
 	// Fetch server list
 	progress("servers", "Fetching server list...")
@@ -62,6 +63,7 @@ func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string
 	progress("servers", fmt.Sprintf("Found %d servers, selecting closest...", len(servers)))
 	// Select the first server (closest by default)
 	target := servers[0]
+	progress("servers", fmt.Sprintf("Selected server: %s (%s)", target.Name, target.Country))
 
 	// Test ping/latency
 	progress("ping", "Testing ping and latency...")
@@ -69,6 +71,10 @@ func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string
 	if err != nil {
 		return nil, fmt.Errorf("ping test: %w", err)
 	}
+	// Convert latency from Duration to milliseconds
+	pingMs := target.Latency.Seconds() * 1000.0
+	jitterMs := target.Jitter.Seconds() * 1000.0
+	progress("ping", fmt.Sprintf("Ping: %.1f ms, Jitter: %.1f ms", pingMs, jitterMs))
 
 	// Test download
 	progress("download", "Testing download speed...")
@@ -76,6 +82,10 @@ func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string
 	if err != nil {
 		return nil, fmt.Errorf("download test: %w", err)
 	}
+	// Convert results using the library's Mbps() method
+	// ByteRate represents bits per second, and Mbps() converts to Mbps
+	downloadMbps := target.DLSpeed.Mbps()
+	progress("download", fmt.Sprintf("Download: %.2f Mbps", downloadMbps))
 
 	// Test upload
 	progress("upload", "Testing upload speed...")
@@ -83,6 +93,8 @@ func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string
 	if err != nil {
 		return nil, fmt.Errorf("upload test: %w", err)
 	}
+	uploadMbps := target.ULSpeed.Mbps()
+	progress("upload", fmt.Sprintf("Upload: %.2f Mbps", uploadMbps))
 
 	progress("processing", "Processing results...")
 
@@ -92,15 +104,6 @@ func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string
 	log.Printf("[speedtest] Latency: %v, Jitter: %v", target.Latency, target.Jitter)
 	log.Printf("[speedtest] Server: %s (%s) - ID: %s", target.Name, target.Country, target.ID)
 	log.Printf("[speedtest] User IP: %s, ISP: %s", user.IP, user.Isp)
-
-	// Convert results using the library's Mbps() method
-	// ByteRate represents bits per second, and Mbps() converts to Mbps
-	downloadMbps := target.DLSpeed.Mbps()
-	uploadMbps := target.ULSpeed.Mbps()
-
-	// Convert latency from Duration to milliseconds
-	pingMs := target.Latency.Seconds() * 1000.0
-	jitterMs := target.Jitter.Seconds() * 1000.0
 
 	// Get packet loss percentage
 	packetLossPct := target.PacketLoss.LossPercent()

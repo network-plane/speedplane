@@ -62,7 +62,15 @@ func (pt *progressTracker) removeSession(id string) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 	if ch, ok := pt.sessions[id]; ok {
-		close(ch)
+		// Safely close channel - recover from panic if already closed
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// Channel already closed, ignore
+				}
+			}()
+			close(ch)
+		}()
 		delete(pt.sessions, id)
 	}
 }
@@ -75,11 +83,23 @@ type Server struct {
 	sched        *scheduler.Scheduler
 	progress     *progressTracker
 	saveConfig   func()
+	getSaveManualRuns func() bool
+	setSaveManualRuns func(bool) error
 	wsManager    *WSConnectionManager
 }
 
+// runManual executes a speedtest for manual runs. Results are never saved automatically.
+func (s *Server) runManual(ctx context.Context) (*model.SpeedtestResult, error) {
+	return s.runSpeedtest(ctx)
+}
+
+// runManualWithProgress executes a speedtest with progress for manual runs. Results are never saved automatically.
+func (s *Server) runManualWithProgress(ctx context.Context, progress func(stage string, message string)) (*model.SpeedtestResult, error) {
+	return s.runWithProgress(ctx, progress)
+}
+
 // NewServer creates a new API server with the given dependencies.
-func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithProgressFunc, sched *scheduler.Scheduler, saveConfig func()) *Server {
+func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithProgressFunc, sched *scheduler.Scheduler, saveConfig func(), getSaveManualRuns func() bool, setSaveManualRuns func(bool) error) *Server {
 	return &Server{
 		store:          store,
 		runSpeedtest:   runFn,
@@ -87,6 +107,8 @@ func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithPro
 		sched:          sched,
 		progress:       newProgressTracker(),
 		saveConfig:     saveConfig,
+		getSaveManualRuns: getSaveManualRuns,
+		setSaveManualRuns: setSaveManualRuns,
 		wsManager:      NewWSConnectionManager(),
 	}
 }
@@ -96,6 +118,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/summary", s.handleSummary)
 	mux.HandleFunc("/api/history", s.handleHistory)
+	mux.HandleFunc("/api/results", s.handleResults)
 	mux.HandleFunc("/api/results/", s.handleResultByID)
 	mux.HandleFunc("/api/chart-data", s.handleChartData)
 	mux.HandleFunc("/api/run", s.handleRun)
@@ -108,6 +131,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/export/history.csv", s.handleExportHistoryCSV)
 	mux.HandleFunc("/api/export/current.json", s.handleExportCurrentJSON)
 	mux.HandleFunc("/api/export/current.csv", s.handleExportCurrentCSV)
+	mux.HandleFunc("/api/preferences", s.handlePreferences)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 }
 
@@ -236,6 +260,29 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, results)
 }
 
+// handleResults handles POST requests to save a result.
+func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var res model.SpeedtestResult
+	if err := json.NewDecoder(r.Body).Decode(&res); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.SaveResult(&res); err != nil {
+		http.Error(w, "failed to save result", http.StatusInternalServerError)
+		log.Printf("save result: %v", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, res)
+}
+
 // handleResultByID handles operations on a specific result by ID.
 func (s *Server) handleResultByID(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/results/")
@@ -277,7 +324,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.runSpeedtest(r.Context())
+	res, err := s.runManual(r.Context())
 	if err != nil {
 		http.Error(w, "speedtest failed", http.StatusInternalServerError)
 		log.Printf("run speedtest: %v", err)
@@ -351,11 +398,13 @@ func (s *Server) handleRunStream(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		result, err := s.runWithProgress(ctx, progressFn)
+		result, err := s.runManualWithProgress(ctx, progressFn)
 		resultCh <- struct {
 			result *model.SpeedtestResult
 			err    error
 		}{result, err}
+		// Close channel to signal completion to main loop
+		// removeSession will also try to close it, but has recover to handle double-close
 		close(progressCh)
 	}()
 
@@ -937,6 +986,49 @@ func (s *Server) handleExportCurrentCSV(w http.ResponseWriter, r *http.Request) 
 	if err := writer.Write(row); err != nil {
 		log.Printf("write CSV row error: %v", err)
 		return
+	}
+}
+
+// ---------- preferences API ----------
+
+func (s *Server) handlePreferences(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		saveManualRuns := false
+		if s.getSaveManualRuns != nil {
+			saveManualRuns = s.getSaveManualRuns()
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"save_manual_runs": saveManualRuns,
+		})
+
+	case http.MethodPut:
+		var req struct {
+			SaveManualRuns bool `json:"save_manual_runs"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+
+		if s.setSaveManualRuns == nil {
+			http.Error(w, "preference update not configured", http.StatusInternalServerError)
+			return
+		}
+
+		if err := s.setSaveManualRuns(req.SaveManualRuns); err != nil {
+			http.Error(w, "failed to update preference", http.StatusInternalServerError)
+			log.Printf("update preference: %v", err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"save_manual_runs": req.SaveManualRuns,
+		})
+
+	default:
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPut)
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
