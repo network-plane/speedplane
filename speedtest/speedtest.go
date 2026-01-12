@@ -29,17 +29,27 @@ func NewRunner() *Runner {
 // Run executes a complete speed test including ping, download, and upload tests.
 // It returns a SpeedtestResult with all the test metrics.
 func (r *Runner) Run(ctx context.Context) (*model.SpeedtestResult, error) {
-	log.Println("[speedtest] Starting speedtest...")
+	return r.RunWithProgress(ctx, func(_ string, _ string) {})
+}
+
+// RunWithProgress executes a speed test with progress callbacks.
+// If progress is nil, it behaves like Run().
+func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string, message string)) (*model.SpeedtestResult, error) {
+	if progress == nil {
+		progress = func(_ string, _ string) {}
+	}
+
+	progress("init", "Starting speedtest...")
 
 	// Fetch user info
-	log.Println("[speedtest] Fetching user info...")
+	progress("user", "Fetching user info...")
 	user, err := r.client.FetchUserInfoContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch user info: %w", err)
 	}
 
 	// Fetch server list
-	log.Println("[speedtest] Fetching server list...")
+	progress("servers", "Fetching server list...")
 	servers, err := r.client.FetchServerListContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch server list: %w", err)
@@ -49,30 +59,32 @@ func (r *Runner) Run(ctx context.Context) (*model.SpeedtestResult, error) {
 		return nil, fmt.Errorf("no servers available")
 	}
 
-	log.Printf("[speedtest] Found %d servers, selecting closest...", len(servers))
+	progress("servers", fmt.Sprintf("Found %d servers, selecting closest...", len(servers)))
 	// Select the first server (closest by default)
 	target := servers[0]
 
 	// Test ping/latency
-	log.Println("[speedtest] Running ping test...")
+	progress("ping", "Testing ping and latency...")
 	err = target.PingTestContext(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("ping test: %w", err)
 	}
 
 	// Test download
-	log.Println("[speedtest] Running download test...")
+	progress("download", "Testing download speed...")
 	err = target.DownloadTestContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("download test: %w", err)
 	}
 
 	// Test upload
-	log.Println("[speedtest] Running upload test...")
+	progress("upload", "Testing upload speed...")
 	err = target.UploadTestContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("upload test: %w", err)
 	}
+
+	progress("processing", "Processing results...")
 
 	// Debug output
 	log.Printf("[speedtest] Raw DLSpeed: %.2f (ByteRate), Mbps(): %.2f", float64(target.DLSpeed), target.DLSpeed.Mbps())

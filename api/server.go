@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"speedplane/model"
@@ -17,18 +18,64 @@ import (
 )
 
 type RunFunc func(ctx context.Context) (*model.SpeedtestResult, error)
+type RunWithProgressFunc func(ctx context.Context, progress func(stage string, message string)) (*model.SpeedtestResult, error)
+
+type progressUpdate struct {
+	Stage   string `json:"stage"`
+	Message string `json:"message"`
+	Time    string `json:"time"`
+}
+
+type progressTracker struct {
+	mu       sync.RWMutex
+	sessions map[string]chan progressUpdate
+}
+
+func newProgressTracker() *progressTracker {
+	return &progressTracker{
+		sessions: make(map[string]chan progressUpdate),
+	}
+}
+
+func (pt *progressTracker) createSession(id string) chan progressUpdate {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+	ch := make(chan progressUpdate, 10)
+	pt.sessions[id] = ch
+	return ch
+}
+
+func (pt *progressTracker) getSession(id string) (chan progressUpdate, bool) {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+	ch, ok := pt.sessions[id]
+	return ch, ok
+}
+
+func (pt *progressTracker) removeSession(id string) {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+	if ch, ok := pt.sessions[id]; ok {
+		close(ch)
+		delete(pt.sessions, id)
+	}
+}
 
 type Server struct {
 	store        *storage.Store
 	runSpeedtest RunFunc
+	runWithProgress RunWithProgressFunc
 	sched        *scheduler.Scheduler
+	progress     *progressTracker
 }
 
-func NewServer(store *storage.Store, runFn RunFunc, sched *scheduler.Scheduler) *Server {
+func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithProgressFunc, sched *scheduler.Scheduler) *Server {
 	return &Server{
-		store:        store,
-		runSpeedtest: runFn,
-		sched:        sched,
+		store:          store,
+		runSpeedtest:   runFn,
+		runWithProgress: runWithProgressFn,
+		sched:          sched,
+		progress:       newProgressTracker(),
 	}
 }
 
@@ -37,6 +84,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/summary", s.handleSummary)
 	mux.HandleFunc("/api/history", s.handleHistory)
 	mux.HandleFunc("/api/run", s.handleRun)
+	mux.HandleFunc("/api/run/stream", s.handleRunStream)
+	mux.HandleFunc("/api/run/progress/", s.handleRunProgress)
 	mux.HandleFunc("/api/schedules", s.handleSchedules)
 	mux.HandleFunc("/api/schedules/", s.handleScheduleByID)
 	mux.HandleFunc("/api/export/history.json", s.handleExportHistoryJSON)
@@ -192,6 +241,172 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, res)
+}
+
+// handleRunStream starts a speedtest with progress streaming via SSE
+func (s *Server) handleRunStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.runWithProgress == nil {
+		http.Error(w, "speedtest runner not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate session ID
+	sessionID := generateID()
+
+	// Set up SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
+
+	// Create progress channel
+	progressCh := s.progress.createSession(sessionID)
+	defer s.progress.removeSession(sessionID)
+
+	// Send initial message with session ID
+	fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]interface{}{
+		"type":      "started",
+		"sessionId": sessionID,
+		"message":   "Starting speedtest...",
+	}))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	// Run speedtest in goroutine
+	ctx := r.Context()
+	resultCh := make(chan struct {
+		result *model.SpeedtestResult
+		err    error
+	}, 1)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				resultCh <- struct {
+					result *model.SpeedtestResult
+					err    error
+				}{nil, fmt.Errorf("panic: %v", r)}
+			}
+		}()
+
+		progressFn := func(stage string, message string) {
+			select {
+			case progressCh <- progressUpdate{
+				Stage:   stage,
+				Message: message,
+				Time:    time.Now().UTC().Format(time.RFC3339),
+			}:
+			case <-ctx.Done():
+			}
+		}
+
+		result, err := s.runWithProgress(ctx, progressFn)
+		resultCh <- struct {
+			result *model.SpeedtestResult
+			err    error
+		}{result, err}
+		close(progressCh)
+	}()
+
+	// Stream progress updates
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case update, ok := <-progressCh:
+			if !ok {
+				// Channel closed, get final result
+				final := <-resultCh
+				if final.err != nil {
+					fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]interface{}{
+						"type":    "error",
+						"message": final.err.Error(),
+					}))
+				} else if final.result != nil {
+					fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]interface{}{
+						"type":    "completed",
+						"result":  final.result,
+						"message": "Speedtest completed successfully",
+					}))
+				}
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]interface{}{
+				"type":    "progress",
+				"stage":   update.Stage,
+				"message": update.Message,
+				"time":    update.Time,
+			}))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}
+}
+
+// handleRunProgress provides SSE endpoint for a specific session
+func (s *Server) handleRunProgress(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimPrefix(r.URL.Path, "/api/run/progress/")
+	if sessionID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	progressCh, ok := s.progress.getSession(sessionID)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Set up SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	ctx := r.Context()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case update, ok := <-progressCh:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]interface{}{
+				"type":    "progress",
+				"stage":   update.Stage,
+				"message": update.Message,
+				"time":    update.Time,
+			}))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		case <-ticker.C:
+			// Keep connection alive
+		}
+	}
+}
+
+func mustJSON(v interface{}) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return `{"error":"marshal error"}`
+	}
+	return string(b)
 }
 
 // ---------- schedules API ----------

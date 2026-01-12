@@ -124,7 +124,20 @@ func run(cmd *cobra.Command, args []string) {
 	indexTemplate := template.Must(template.New("index").Parse(string(indexHTML)))
 
 	mux := http.NewServeMux()
-	apiServer := api.NewServer(store, runAndSave, sched)
+
+	// Create progress-enabled runner
+	runWithProgress := func(ctx context.Context, progress func(stage string, message string)) (*model.SpeedtestResult, error) {
+		res, err := runner.RunWithProgress(ctx, progress)
+		if err != nil {
+			return nil, err
+		}
+		if err := store.SaveResult(res); err != nil {
+			return nil, err
+		}
+		return res, nil
+	}
+
+	apiServer := api.NewServer(store, runAndSave, runWithProgress, sched)
 	apiServer.Register(mux)
 
 	// Theme API endpoints

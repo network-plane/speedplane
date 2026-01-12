@@ -369,9 +369,17 @@
     if (!btn) return;
     btn.addEventListener("click", async () => {
       btn.disabled = true;
-      btn.textContent = "Running...";
+      btn.textContent = "Starting...";
+      const modal = showProgressModal();
+      const statusEl = modal.querySelector(".progress-status");
+      const messageEl = modal.querySelector(".progress-message");
       try {
-        await fetchJSON("/api/run", { method: "POST" });
+        const result = await runSpeedtestWithProgress((stage, message) => {
+          if (statusEl) statusEl.textContent = stage;
+          if (messageEl) messageEl.textContent = message;
+          btn.textContent = message;
+        });
+        closeProgressModal(modal);
         await Promise.all([
           loadSummary(),
           loadHistoryTable(),
@@ -380,10 +388,102 @@
         ]);
       } catch (err) {
         console.error("run-now failed", err);
+        closeProgressModal(modal);
+        alert("Speedtest failed: " + (err instanceof Error ? err.message : String(err)));
       } finally {
         btn.disabled = false;
         btn.textContent = "Run speedtest now";
       }
+    });
+  }
+  function showProgressModal() {
+    const modal = document.createElement("div");
+    modal.className = "progress-modal-overlay";
+    modal.innerHTML = `
+    <div class="progress-modal">
+      <div class="progress-header">
+        <h3>Running Speedtest</h3>
+      </div>
+      <div class="progress-content">
+        <div class="progress-spinner"></div>
+        <div class="progress-status"></div>
+        <div class="progress-message"></div>
+      </div>
+    </div>
+  `;
+    document.body.appendChild(modal);
+    return modal;
+  }
+  function closeProgressModal(modal) {
+    if (modal && modal.parentNode) {
+      modal.parentNode.removeChild(modal);
+    }
+  }
+  async function runSpeedtestWithProgress(onProgress) {
+    return new Promise((resolve, reject) => {
+      fetch("/api/run/stream", { method: "POST" }).then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        if (!response.body) {
+          throw new Error("Response body is null");
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        function processChunk() {
+          return reader.read().then(({ done, value }) => {
+            if (done) {
+              if (buffer.trim()) {
+                const lines2 = buffer.split("\n");
+                for (const line of lines2) {
+                  if (line.startsWith("data: ")) {
+                    try {
+                      const data = JSON.parse(line.slice(6));
+                      if (data.type === "completed") {
+                        resolve(data.result);
+                        return;
+                      } else if (data.type === "error") {
+                        reject(new Error(data.message || "Speedtest failed"));
+                        return;
+                      }
+                    } catch (e) {
+                      console.error("Failed to parse SSE data:", e);
+                    }
+                  }
+                }
+              }
+              return;
+            }
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.type === "progress") {
+                    onProgress(data.stage || "", data.message || "");
+                  } else if (data.type === "completed") {
+                    reader.cancel();
+                    resolve(data.result);
+                    return;
+                  } else if (data.type === "error") {
+                    reader.cancel();
+                    reject(new Error(data.message || "Speedtest failed"));
+                    return;
+                  } else if (data.type === "started") {
+                  }
+                } catch (e) {
+                  console.error("Failed to parse SSE data:", e, line);
+                }
+              }
+            }
+            return processChunk();
+          });
+        }
+        return processChunk();
+      }).catch(reject);
     });
   }
   function toggleScheduleFields(type) {
