@@ -10,6 +10,9 @@
   --accent:#FF1493;
   --good:#00FFFF;
   --warn:#FFD700;
+  --severity-error:#FF1744;
+  --severity-warning:#FFD700;
+  --severity-success:#00FFFF;
 }
 
 /*
@@ -30,6 +33,9 @@ Display: Default
   --accent:#FF1493;
   --good:#00FFFF;
   --warn:#FFD700;
+  --severity-error:#FF1744;
+  --severity-warning:#FFD700;
+  --severity-success:#00FFFF;
 }
 
 /*
@@ -51,6 +57,9 @@ Border: true
   --accent:#FF69B4;
   --good:#00CED1;
   --warn:#FFA500;
+  --severity-error:#EF4444;
+  --severity-warning:#F59E0B;
+  --severity-success:#10B981;
 }
 
 /*
@@ -71,6 +80,9 @@ Display: Neon
   --accent:#FF00FF;
   --good:#00FFFF;
   --warn:#FFFF00;
+  --severity-error:#EF4444;
+  --severity-warning:#F59E0B;
+  --severity-success:#10B981;
 }
 
 /*
@@ -91,6 +103,9 @@ Display: Cyberpunk
   --accent:#00FFFF;
   --good:#00FF88;
   --warn:#FFD700;
+  --severity-error:#EF4444;
+  --severity-warning:#F59E0B;
+  --severity-success:#10B981;
 }
 
 /*
@@ -111,6 +126,9 @@ Display: Purple
   --accent:#9D4EDD;
   --good:#00FFFF;
   --warn:#FFD700;
+  --severity-error:#EF4444;
+  --severity-warning:#F59E0B;
+  --severity-success:#10B981;
 }
 
 *{box-sizing:border-box}

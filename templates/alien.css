@@ -10,6 +10,9 @@
   --accent:#FF8C00;
   --good:#00FF88;
   --warn:#FF8C00;
+  --severity-error:#FF4757;
+  --severity-warning:#FF8C00;
+  --severity-success:#00FF88;
 }
 
 /*
@@ -30,6 +33,9 @@ Display: Default
   --accent:#FF8C00;
   --good:#00FF88;
   --warn:#FF8C00;
+  --severity-error:#FF4757;
+  --severity-warning:#FF8C00;
+  --severity-success:#00FF88;
 }
 
 /*
@@ -51,6 +57,9 @@ Border: true
   --accent:#FFA500;
   --good:#00CC6A;
   --warn:#FFA500;
+  --severity-error:#EF4444;
+  --severity-warning:#F59E0B;
+  --severity-success:#10B981;
 }
 
 /*
@@ -71,6 +80,9 @@ Display: Amber
   --accent:#FFB84D;
   --good:#00FF88;
   --warn:#FFB84D;
+  --severity-error:#EF4444;
+  --severity-warning:#F59E0B;
+  --severity-success:#10B981;
 }
 
 /*
@@ -91,6 +103,9 @@ Display: Industrial
   --accent:#CC7700;
   --good:#00AA66;
   --warn:#CC7700;
+  --severity-error:#EF4444;
+  --severity-warning:#F59E0B;
+  --severity-success:#10B981;
 }
 
 /*
@@ -111,6 +126,9 @@ Display: Rust
   --accent:#FF6B35;
   --good:#00FF88;
   --warn:#FF6B35;
+  --severity-error:#EF4444;
+  --severity-warning:#F59E0B;
+  --severity-success:#10B981;
 }
 
 *{box-sizing:border-box}

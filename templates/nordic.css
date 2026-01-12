@@ -10,6 +10,9 @@
   --accent:rgba(136,192,208,.85);
   --good:rgba(163,190,140,.85);
   --warn:rgba(235,203,139,.85);
+  --severity-error:#BF616A;
+  --severity-warning:#EBCB8B;
+  --severity-success:#A3BE8C;
 }
 
 /*
@@ -30,6 +33,9 @@ Display: Default
   --accent:rgba(136,192,208,.85);
   --good:rgba(163,190,140,.85);
   --warn:rgba(235,203,139,.85);
+  --severity-error:#BF616A;
+  --severity-warning:#EBCB8B;
+  --severity-success:#A3BE8C;
 }
 
 /*
@@ -51,6 +57,9 @@ Border: true
   --accent:rgba(136,192,208,.85);
   --good:rgba(163,190,140,.85);
   --warn:rgba(235,203,139,.85);
+  --severity-error:#BF616A;
+  --severity-warning:#EBCB8B;
+  --severity-success:#A3BE8C;
 }
 *{box-sizing:border-box}
 html,body{height:100%}

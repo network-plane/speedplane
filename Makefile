@@ -1,4 +1,4 @@
-ESBUILD ?= /usr/local/bin/esbuild
+ESBUILD ?= esbuild
 GO      ?= go
 
 WEB_SRC     := web/src
@@ -9,23 +9,31 @@ JS_BUNDLE   := $(WEB_DIST)/main.js
 BIN_NAME    := speedplane
 CMD_DIR     := ./
 
-.PHONY: all build frontend backend clean
+.PHONY: all build frontend backend clean clean-frontend
 
 all: build
 
 build: frontend backend
 
-frontend: $(JS_BUNDLE)
+frontend: $(JS_BUNDLE) $(WEB_DIST)/index.html $(WEB_DIST)/styles.css
 
 $(JS_BUNDLE): $(JS_ENTRY)
 	mkdir -p $(WEB_DIST)
 	$(ESBUILD) $(JS_ENTRY) --bundle --outfile=$(JS_BUNDLE) --sourcemap
+
+$(WEB_DIST)/index.html: $(WEB_SRC)/index.html
+	mkdir -p $(WEB_DIST)
 	cp $(WEB_SRC)/index.html $(WEB_DIST)/
+
+$(WEB_DIST)/styles.css: $(WEB_SRC)/styles.css
+	mkdir -p $(WEB_DIST)
 	cp $(WEB_SRC)/styles.css $(WEB_DIST)/
 
 backend:
 	$(GO) build -o $(BIN_NAME) .
 
-clean:
+clean-frontend:
 	rm -rf $(WEB_DIST)
+
+clean: clean-frontend
 	rm -f $(BIN_NAME)

@@ -38,6 +38,31 @@
   function formatDateTime(date) {
     return `${formatDate(date)} ${formatTime24h(date)}`;
   }
+  function updateComparison(compareEl, latest, average, isLowerBetter) {
+    if (!average || average === 0 || !latest || latest < 0) {
+      compareEl.textContent = "";
+      compareEl.className = "card-compare";
+      return;
+    }
+    const percentDiff = (latest - average) / average * 100;
+    const absPercent = Math.abs(percentDiff);
+    if (absPercent < 0.1) {
+      compareEl.textContent = "";
+      compareEl.className = "card-compare";
+      return;
+    }
+    let isSlower;
+    if (isLowerBetter) {
+      isSlower = percentDiff > 0;
+    } else {
+      isSlower = percentDiff < 0;
+    }
+    const arrow = isSlower ? isLowerBetter ? "\u2191" : "\u2193" : isLowerBetter ? "\u2193" : "\u2191";
+    const text = isSlower ? "slower" : "faster";
+    const className = isSlower ? "card-compare slower" : "card-compare faster";
+    compareEl.className = className;
+    compareEl.innerHTML = `<span class="arrow">${arrow}</span> ${formatNumber(absPercent, 2)}% ${text}`;
+  }
   async function loadSummary() {
     const data = await fetchJSON("/api/summary");
     if (data.latest) {
@@ -63,6 +88,54 @@
       } else {
         $("latest-packetloss-value").textContent = formatNumber(packetLoss, 2);
         $("latest-packetloss-sub").textContent = "%";
+      }
+      const avg30 = data.averages["last30days"];
+      if (avg30) {
+        updateComparison(
+          $("latest-download-compare"),
+          data.latest.download_mbps,
+          avg30.avg_download_mbps,
+          false
+          // Higher is better
+        );
+        updateComparison(
+          $("latest-upload-compare"),
+          data.latest.upload_mbps,
+          avg30.avg_upload_mbps,
+          false
+          // Higher is better
+        );
+        updateComparison(
+          $("latest-ping-compare"),
+          data.latest.ping_ms,
+          avg30.avg_ping_ms,
+          true
+          // Lower is better
+        );
+        if (data.latest.jitter_ms !== void 0 && data.latest.jitter_ms >= 0) {
+          updateComparison(
+            $("latest-jitter-compare"),
+            data.latest.jitter_ms,
+            avg30.avg_jitter_ms,
+            true
+            // Lower is better
+          );
+        } else {
+          $("latest-jitter-compare").textContent = "";
+          $("latest-jitter-compare").className = "card-compare";
+        }
+        if (packetLoss >= 0) {
+          updateComparison(
+            $("latest-packetloss-compare"),
+            packetLoss,
+            avg30.avg_packet_loss_pct,
+            true
+            // Lower is better
+          );
+        } else {
+          $("latest-packetloss-compare").textContent = "";
+          $("latest-packetloss-compare").className = "card-compare";
+        }
       }
     }
   }

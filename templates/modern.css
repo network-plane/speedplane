@@ -10,6 +10,9 @@
   --accent:#FF6B9D;
   --good:#4ECDC4;
   --warn:#FFE66D;
+  --severity-error:#FF4757;
+  --severity-warning:#FFE66D;
+  --severity-success:#4ECDC4;
 }
 
 /*
@@ -30,6 +33,9 @@ Display: Default
   --accent:#FF6B9D;
   --good:#4ECDC4;
   --warn:#FFE66D;
+  --severity-error:#FF4757;
+  --severity-warning:#FFE66D;
+  --severity-success:#4ECDC4;
 }
 
 *{box-sizing:border-box}
