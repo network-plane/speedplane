@@ -10,6 +10,20 @@ Speedplane is a tool for tracking internet speedtest results with a web dashboar
 - Historical data tracking with charts and metrics
 - Configurable via config file or command-line flags
 
+## Screenshots
+### All graphs
+<img width="1478" height="1264" alt="dashboard-all-graphs" src="https://github.com/user-attachments/assets/07dc66e6-e722-4df4-9dcc-9bfc72f868c6" />
+
+### Single Graph (log)
+<img width="1499" height="565" alt="dashboard-combined-graph" src="https://github.com/user-attachments/assets/d24971ac-e899-436b-a793-f47c8922c8cd" />
+
+### Results
+<img width="1488" height="317" alt="results" src="https://github.com/user-attachments/assets/ffe3c4a3-fae4-438a-bcbf-b95ea094ee1a" />
+
+### Preferences
+<img width="1497" height="521" alt="preferences" src="https://github.com/user-attachments/assets/b25c48db-1aa0-4774-94a7-c868944e6615" />
+
+
 ## Installation
 
 ### Building from source
