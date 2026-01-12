@@ -314,9 +314,11 @@
           await fetchJSON(`/api/schedules/${s.id}`, {
             method: "DELETE"
           });
+          card.remove();
           await loadSchedules();
         } catch (err) {
           console.error("delete schedule failed", err);
+          alert("Failed to delete schedule. Please refresh the page.");
         }
       });
       actions.appendChild(toggleBtn);

@@ -159,12 +159,21 @@
           </div>
           <div class="chart" id="jitter-chart"></div>
         </div>
+
+        <div style="display: flex; gap: 8px; justify-content: center; margin-top: 16px;">
+          <a href="/api/export/current.json" class="btn" download>Export JSON</a>
+          <a href="/api/export/current.csv" class="btn" download>Export CSV</a>
+        </div>
       </section>
 
       <section id="view-history" class="view">
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title">Results</div>
+            <div style="display: flex; gap: 8px;">
+              <a href="/api/export/history.json" class="btn" download>Export JSON</a>
+              <a href="/api/export/history.csv" class="btn" download>Export CSV</a>
+            </div>
           </div>
           <table class="table" id="history-table">
             <thead>

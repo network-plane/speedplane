@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +39,10 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/run", s.handleRun)
 	mux.HandleFunc("/api/schedules", s.handleSchedules)
 	mux.HandleFunc("/api/schedules/", s.handleScheduleByID)
+	mux.HandleFunc("/api/export/history.json", s.handleExportHistoryJSON)
+	mux.HandleFunc("/api/export/history.csv", s.handleExportHistoryCSV)
+	mux.HandleFunc("/api/export/current.json", s.handleExportCurrentJSON)
+	mux.HandleFunc("/api/export/current.csv", s.handleExportCurrentCSV)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -312,4 +318,192 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func generateID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+// ---------- export API ----------
+
+func (s *Server) handleExportHistoryJSON(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	now := time.Now()
+	from := now.AddDate(0, 0, -30)
+	to := now
+
+	if v := q.Get("from"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err == nil {
+			from = t
+		}
+	}
+	if v := q.Get("to"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err == nil {
+			to = t
+		}
+	}
+
+	results, err := s.store.ListResults(from, to)
+	if err != nil {
+		http.Error(w, "failed to load history", http.StatusInternalServerError)
+		return
+	}
+
+	filename := fmt.Sprintf("speedtest-history-%s.json", time.Now().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	writeJSON(w, http.StatusOK, results)
+}
+
+func (s *Server) handleExportHistoryCSV(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	now := time.Now()
+	from := now.AddDate(0, 0, -30)
+	to := now
+
+	if v := q.Get("from"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err == nil {
+			from = t
+		}
+	}
+	if v := q.Get("to"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err == nil {
+			to = t
+		}
+	}
+
+	results, err := s.store.ListResults(from, to)
+	if err != nil {
+		http.Error(w, "failed to load history", http.StatusInternalServerError)
+		return
+	}
+
+	filename := fmt.Sprintf("speedtest-history-%s.csv", time.Now().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	// Write header
+	header := []string{
+		"ID", "Timestamp", "Download (Mbps)", "Upload (Mbps)", "Ping (ms)",
+		"Jitter (ms)", "Packet Loss (%)", "ISP", "External IP",
+		"Server ID", "Server Name", "Server Country",
+	}
+	if err := writer.Write(header); err != nil {
+		log.Printf("write CSV header error: %v", err)
+		return
+	}
+
+	// Write data rows
+	for _, r := range results {
+		row := []string{
+			r.ID,
+			r.Timestamp.Format(time.RFC3339),
+			strconv.FormatFloat(r.DownloadMbps, 'f', 2, 64),
+			strconv.FormatFloat(r.UploadMbps, 'f', 2, 64),
+			strconv.FormatFloat(r.PingMs, 'f', 2, 64),
+			strconv.FormatFloat(r.JitterMs, 'f', 2, 64),
+			strconv.FormatFloat(r.PacketLossPct, 'f', 2, 64),
+			r.ISP,
+			r.ExternalIP,
+			r.ServerID,
+			r.ServerName,
+			r.ServerCountry,
+		}
+		if err := writer.Write(row); err != nil {
+			log.Printf("write CSV row error: %v", err)
+			return
+		}
+	}
+}
+
+func (s *Server) handleExportCurrentJSON(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	from := now.AddDate(0, 0, -1)
+	to := now
+
+	results, err := s.store.ListResults(from, to)
+	if err != nil {
+		http.Error(w, "failed to load current data", http.StatusInternalServerError)
+		return
+	}
+
+	var latest *model.SpeedtestResult
+	if len(results) > 0 {
+		tmp := results[len(results)-1]
+		latest = &tmp
+	}
+
+	if latest == nil {
+		http.Error(w, "no current data available", http.StatusNotFound)
+		return
+	}
+
+	filename := fmt.Sprintf("speedtest-current-%s.json", time.Now().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	writeJSON(w, http.StatusOK, latest)
+}
+
+func (s *Server) handleExportCurrentCSV(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	from := now.AddDate(0, 0, -1)
+	to := now
+
+	results, err := s.store.ListResults(from, to)
+	if err != nil {
+		http.Error(w, "failed to load current data", http.StatusInternalServerError)
+		return
+	}
+
+	var latest *model.SpeedtestResult
+	if len(results) > 0 {
+		tmp := results[len(results)-1]
+		latest = &tmp
+	}
+
+	if latest == nil {
+		http.Error(w, "no current data available", http.StatusNotFound)
+		return
+	}
+
+	filename := fmt.Sprintf("speedtest-current-%s.csv", time.Now().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	// Write header
+	header := []string{
+		"ID", "Timestamp", "Download (Mbps)", "Upload (Mbps)", "Ping (ms)",
+		"Jitter (ms)", "Packet Loss (%)", "ISP", "External IP",
+		"Server ID", "Server Name", "Server Country",
+	}
+	if err := writer.Write(header); err != nil {
+		log.Printf("write CSV header error: %v", err)
+		return
+	}
+
+	// Write data row
+	row := []string{
+		latest.ID,
+		latest.Timestamp.Format(time.RFC3339),
+		strconv.FormatFloat(latest.DownloadMbps, 'f', 2, 64),
+		strconv.FormatFloat(latest.UploadMbps, 'f', 2, 64),
+		strconv.FormatFloat(latest.PingMs, 'f', 2, 64),
+		strconv.FormatFloat(latest.JitterMs, 'f', 2, 64),
+		strconv.FormatFloat(latest.PacketLossPct, 'f', 2, 64),
+		latest.ISP,
+		latest.ExternalIP,
+		latest.ServerID,
+		latest.ServerName,
+		latest.ServerCountry,
+	}
+	if err := writer.Write(row); err != nil {
+		log.Printf("write CSV row error: %v", err)
+		return
+	}
 }
