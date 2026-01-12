@@ -153,8 +153,54 @@
       <td style="font-family: monospace; font-size: 12px;">${r.external_ip || "\u2013"}</td>
       <td>${r.isp || "\u2013"}</td>
       <td>${serverInfo}</td>
+      <td>
+        <button class="btn delete-result-btn" data-result-id="${r.id}" style="padding: 4px 8px; font-size: 12px; background-color: #dc3545; color: white; border: none;">Delete</button>
+      </td>
     `;
       tbody.appendChild(tr);
+    }
+    const deleteButtons = tbody.querySelectorAll(".delete-result-btn");
+    deleteButtons.forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        const button = e.target;
+        const id = button.getAttribute("data-result-id");
+        if (id) {
+          await deleteResult(id);
+        }
+      });
+    });
+  }
+  async function deleteResult(id) {
+    if (!confirm("Are you sure you want to delete this result?")) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/results/${encodeURIComponent(id)}`, {
+        method: "DELETE"
+      });
+      if (!response.ok) {
+        if (response.status === 404) {
+          alert("Result not found");
+        } else {
+          alert("Failed to delete result");
+        }
+        return;
+      }
+      const isCombinedGraph = localStorage.getItem("combined-graph") === "true";
+      const chartPromises = isCombinedGraph ? [updateCombinedChart()] : [
+        updateDownloadChart(),
+        updateUploadChart(),
+        updateLatencyChart(),
+        updateJitterChart()
+      ];
+      await Promise.all([
+        loadSummary(),
+        loadHistoryTable(),
+        ...chartPromises
+      ]);
+    } catch (err) {
+      console.error("Delete result error:", err);
+      alert("Failed to delete result");
     }
   }
   async function loadHistoryForRange(range) {
