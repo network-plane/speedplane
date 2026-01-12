@@ -285,7 +285,8 @@ function renderLineChart(
   }
 
   const svgNS = "http://www.w3.org/2000/svg";
-  // Use a wider aspect ratio to prevent horizontal stretching
+  // Use fixed viewBox coordinate system - SVG will scale to container
+  // This ensures labels and elements are positioned correctly
   const width = 300;
   const height = 50;
   const paddingX = 12;
@@ -295,6 +296,8 @@ function renderLineChart(
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  svg.style.width = "100%";
+  svg.style.height = "100%";
 
   const times = rows.map((r) => new Date(r.timestamp).getTime());
   const values = rows.map((r) => {
@@ -438,6 +441,8 @@ async function renderPercentileChart(
 
   const stats = chartData.stats;
   const svgNS = "http://www.w3.org/2000/svg";
+  // Use fixed viewBox coordinate system - SVG will scale to container
+  // This ensures labels and elements are positioned correctly
   const width = 300;
   const height = 50;
   const paddingX = 12;
@@ -447,6 +452,8 @@ async function renderPercentileChart(
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  svg.style.width = "100%";
+  svg.style.height = "100%";
 
   let minY = Math.min(stats.min, stats.p10);
   let maxY = Math.max(stats.max, stats.p90);

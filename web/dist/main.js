@@ -187,6 +187,8 @@
     const svg = document.createElementNS(svgNS, "svg");
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    svg.style.width = "100%";
+    svg.style.height = "100%";
     const times = rows.map((r) => new Date(r.timestamp).getTime());
     const values = rows.map((r) => {
       const val = r[key];
@@ -304,6 +306,8 @@
     const svg = document.createElementNS(svgNS, "svg");
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    svg.style.width = "100%";
+    svg.style.height = "100%";
     let minY = Math.min(stats.min, stats.p10);
     let maxY = Math.max(stats.max, stats.p90);
     if (minY === maxY) {
