@@ -1,0 +1,38 @@
+{
+  "id": "1768170362148394000",
+  "timestamp": "2026-01-11T22:26:02.148395Z",
+  "download_mbps": 399.4937636330144,
+  "upload_mbps": 478.4461387170678,
+  "ping_ms": 6.890616,
+  "jitter_ms": 0.7860919999999999,
+  "packet_loss_pct": -1,
+  "isp": "Nova Greece",
+  "external_ip": "79.107.29.37",
+  "server_id": "67420",
+  "server_name": "Peiraias",
+  "server_country": "Greece",
+  "raw_json": {
+    "download": {
+      "bandwidth": 49936720.4541268
+    },
+    "interface": {
+      "externalIp": "79.107.29.37"
+    },
+    "isp": "Nova Greece",
+    "packetLoss": -1,
+    "ping": {
+      "jitter": 0.7860919999999999,
+      "latency": 6.890616
+    },
+    "server": {
+      "country": "Greece",
+      "id": "67420",
+      "location": "Peiraias, Greece",
+      "name": "Peiraias"
+    },
+    "timestamp": "2026-01-11T22:26:02Z",
+    "upload": {
+      "bandwidth": 59805767.33963348
+    }
+  }
+}

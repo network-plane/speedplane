@@ -457,9 +457,36 @@ async function loadSchedules(): Promise<void> {
 /* ---------- NAV ---------- */
 
 function setupNav(): void {
+  // Sidebar toggle functionality
+  const sidebar = document.getElementById("sidebar");
+  const sidebarToggle = document.getElementById("sidebar-toggle");
+  const isExpanded = localStorage.getItem("sidebar-expanded") === "true";
+
+  if (sidebar) {
+    if (isExpanded) {
+      sidebar.classList.remove("collapsed");
+    } else {
+      sidebar.classList.add("collapsed");
+    }
+
+    if (sidebarToggle) {
+      sidebarToggle.addEventListener("click", () => {
+        sidebar.classList.toggle("collapsed");
+        const expanded = !sidebar.classList.contains("collapsed");
+        localStorage.setItem("sidebar-expanded", String(expanded));
+      });
+    }
+  }
+
   const buttons = document.querySelectorAll<HTMLButtonElement>(".nav-item");
   buttons.forEach((btn) => {
     btn.addEventListener("click", () => {
+      // Expand sidebar when nav item is clicked (if collapsed)
+      if (sidebar && sidebar.classList.contains("collapsed")) {
+        sidebar.classList.remove("collapsed");
+        localStorage.setItem("sidebar-expanded", "true");
+      }
+
       const view = btn.dataset.view;
       if (!view) return;
 
@@ -587,6 +614,100 @@ function setupRangeSelectors(): void {
   });
 }
 
+/* ---------- THEME SELECTION ---------- */
+
+async function loadSchemesForTemplate(templateName: string): Promise<void> {
+  const schemeSelect = $("pref-scheme") as HTMLSelectElement;
+  const currentScheme = localStorage.getItem("scheme") || "default";
+
+  try {
+    const schemes = await fetchJSON<
+      Array<{ name: string; display: string; accent: string; border: boolean }>
+    >(`/api/schemes?template=${encodeURIComponent(templateName)}`);
+
+    schemeSelect.innerHTML = "";
+    schemes.forEach((scheme) => {
+      const option = document.createElement("option");
+      option.value = scheme.name;
+      option.textContent = scheme.display || scheme.name;
+      if (scheme.name === currentScheme) {
+        option.selected = true;
+      }
+      schemeSelect.appendChild(option);
+    });
+
+    if (schemeSelect.options.length === 0) {
+      const option = document.createElement("option");
+      option.value = "default";
+      option.textContent = "Default";
+      option.selected = true;
+      schemeSelect.appendChild(option);
+    }
+  } catch (err) {
+    console.error("Failed to load schemes:", err);
+  }
+}
+
+async function applyTheme(templateName: string, schemeName: string): Promise<void> {
+  try {
+    const response = await fetch(
+      `/api/theme?template=${encodeURIComponent(templateName)}&scheme=${encodeURIComponent(schemeName)}`,
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to load theme: ${response.status}`);
+    }
+    const css = await response.text();
+    const styleEl = document.getElementById("theme-css");
+    if (styleEl) {
+      styleEl.textContent = css;
+    }
+    document.documentElement.setAttribute("data-template", templateName);
+    document.documentElement.setAttribute("data-scheme", schemeName);
+    localStorage.setItem("template", templateName);
+    localStorage.setItem("scheme", schemeName);
+  } catch (err) {
+    console.error("Failed to apply theme:", err);
+  }
+}
+
+function setupThemeSelection(): void {
+  const templateSelect = $("pref-template") as HTMLSelectElement;
+  const schemeSelect = $("pref-scheme") as HTMLSelectElement;
+
+  // Set current values from localStorage or HTML attributes
+  const savedTemplate = localStorage.getItem("template");
+  const savedScheme = localStorage.getItem("scheme");
+  const htmlTemplate = document.documentElement.getAttribute("data-template");
+  const htmlScheme = document.documentElement.getAttribute("data-scheme");
+
+  const currentTemplate = savedTemplate || htmlTemplate || "speedplane";
+  const currentScheme = savedScheme || htmlScheme || "default";
+
+  // Set template select value if it exists in the options
+  if (Array.from(templateSelect.options).some((opt) => opt.value === currentTemplate)) {
+    templateSelect.value = currentTemplate;
+  }
+  loadSchemesForTemplate(currentTemplate).catch((err) =>
+    console.error("loadSchemesForTemplate", err),
+  );
+
+  templateSelect.addEventListener("change", async () => {
+    const newTemplate = templateSelect.value;
+    // Reset to default scheme when template changes
+    localStorage.setItem("template", newTemplate);
+    localStorage.setItem("scheme", "default");
+    await loadSchemesForTemplate(newTemplate);
+    schemeSelect.value = "default";
+    await applyTheme(newTemplate, "default");
+  });
+
+  schemeSelect.addEventListener("change", async () => {
+    const newScheme = schemeSelect.value;
+    const template = templateSelect.value;
+    await applyTheme(template, newScheme);
+  });
+}
+
 /* ---------- INIT ---------- */
 
 async function init(): Promise<void> {
@@ -594,6 +715,7 @@ async function init(): Promise<void> {
   setupRunNow();
   setupScheduleForm();
   setupRangeSelectors();
+  setupThemeSelection();
 
   await Promise.all([
     loadSummary(),

@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"embed"
 	"fmt"
+	"html/template"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -20,7 +23,14 @@ import (
 	"speedplane/scheduler"
 	"speedplane/speedtest"
 	"speedplane/storage"
+	"speedplane/theme"
 )
+
+//go:embed templates
+var templatesFS embed.FS
+
+//go:embed web/dist
+var staticFS embed.FS
 
 var (
 	dataDir    string
@@ -99,19 +109,97 @@ func run(cmd *cobra.Command, args []string) {
 	sched := scheduler.New(runAndSave, schedules)
 	sched.Start(ctx)
 
+	// Initialize theme manager
+	themeManager, err := theme.NewManager(templatesFS)
+	if err != nil {
+		log.Fatalf("initialize theme manager: %v", err)
+	}
+	themeHandler := theme.NewHandler(themeManager)
+
+	// Load index.html template from static files
+	indexHTML, err := staticFS.ReadFile("web/dist/index.html")
+	if err != nil {
+		log.Fatalf("Failed to read index.html: %v", err)
+	}
+	indexTemplate := template.Must(template.New("index").Parse(string(indexHTML)))
+
 	mux := http.NewServeMux()
 	apiServer := api.NewServer(store, runAndSave, sched)
 	apiServer.Register(mux)
 
-	exePath, err := os.Executable()
-	if err != nil {
-		log.Fatalf("os.Executable: %v", err)
-	}
-	exeDir := filepath.Dir(exePath)
-	webDir := filepath.Join(exeDir, "web", "dist")
+	// Theme API endpoints
+	mux.HandleFunc("/api/theme", themeHandler.HandleTheme)
+	mux.HandleFunc("/api/schemes", themeHandler.HandleSchemes)
 
-	fileServer := http.FileServer(http.Dir(webDir))
-	mux.Handle("/", fileServer)
+	// Index page handler
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+
+		defaultTemplate := "speedplane"
+		defaultScheme := "default"
+		templatesList := themeManager.ListTemplates()
+		if len(templatesList) > 0 {
+			defaultTemplate = templatesList[0]
+			if templateInfo := themeManager.GetTemplate(defaultTemplate); templateInfo != nil {
+				for schemeName := range templateInfo.Schemes {
+					defaultScheme = schemeName
+					break
+				}
+			}
+		}
+
+		templateName := defaultTemplate
+		schemeName := defaultScheme
+
+		templateMenuHTML := themeHandler.GenerateTemplateMenuHTML(templateName)
+		schemeMenuHTML := themeHandler.GenerateSchemeMenuHTML(templateName)
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = indexTemplate.Execute(w, map[string]any{
+			"Title":            "speedplane – Speedtest Tracker",
+			"TemplatesList":    templatesList,
+			"TemplateMenuHTML": template.HTML(templateMenuHTML),
+			"SchemeMenuHTML":   template.HTML(schemeMenuHTML),
+			"CurrentTemplate":  templateName,
+			"CurrentScheme":    schemeName,
+			"AppVersion":       appVersion,
+		})
+	})
+
+	// Static files
+	staticContent, err := fs.Sub(staticFS, "web/dist")
+	if err != nil {
+		log.Fatalf("Failed to create static file sub-filesystem: %v", err)
+	}
+
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticContent))))
+
+	// Serve JS/CSS files directly
+	mux.HandleFunc("/main.js", func(w http.ResponseWriter, r *http.Request) {
+		content, err := staticFS.ReadFile("web/dist/main.js")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Write(content)
+	})
+	mux.HandleFunc("/main.js.map", func(w http.ResponseWriter, r *http.Request) {
+		content, err := staticFS.ReadFile("web/dist/main.js.map")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Write(content)
+	})
+	mux.HandleFunc("/styles.css", func(w http.ResponseWriter, r *http.Request) {
+		// Styles are now loaded via theme API, but keep for backwards compatibility
+		http.NotFound(w, r)
+	})
 
 	srv := &http.Server{
 		Addr:    cfg.ListenAddr,
