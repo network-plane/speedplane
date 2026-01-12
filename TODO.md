@@ -16,3 +16,4 @@
 - [ ] add a way to delete results
 - [ ] sidebar when contracted should not expand when clicking on a menu link unless the user hovers over the menu link for more than 2 seconds
 - [ ] sidebar unless the toggle is clicked should auto collapse
+- [ ] manual run should not store results in the database by default, add a preference for this, if the user enables it then the results are stored in the database

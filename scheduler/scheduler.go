@@ -95,6 +95,14 @@ func (s *Scheduler) check(ctx context.Context, now time.Time) {
 		}
 
 		id := sc.ID
+		// Update lastRun immediately to prevent duplicate runs
+		s.mu.Lock()
+		s.lastRun[id] = now
+		onUpdate := s.onUpdate
+		s.mu.Unlock()
+		if onUpdate != nil {
+			onUpdate()
+		}
 		go s.runOnce(ctx, id, now)
 	}
 }
@@ -106,13 +114,8 @@ func (s *Scheduler) runOnce(ctx context.Context, id string, now time.Time) {
 		return
 	}
 	s.mu.Lock()
-	s.lastRun[id] = now
-	onUpdate := s.onUpdate
 	onComplete := s.onComplete
 	s.mu.Unlock()
-	if onUpdate != nil {
-		onUpdate()
-	}
 	if onComplete != nil && result != nil {
 		onComplete(result)
 	}
