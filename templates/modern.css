@@ -689,6 +689,12 @@ body{
   border-radius:8px;
   padding:16px;
 }
+#individual-charts .panel{
+  margin-bottom:16px;
+}
+#individual-charts .panel:last-child{
+  margin-bottom:0;
+}
 .panel-header{
   display:flex;
   align-items:center;
