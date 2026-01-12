@@ -220,29 +220,194 @@
     }
     container.appendChild(svg);
   }
+  function calculatePercentiles(values) {
+    const sorted = [...values].sort((a, b) => a - b);
+    const len = sorted.length;
+    const percentile = (p) => {
+      if (len === 0) return 0;
+      const index = (len - 1) * p;
+      const lower = Math.floor(index);
+      const upper = Math.ceil(index);
+      const weight = index % 1;
+      return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+    };
+    return {
+      min: sorted[0] ?? 0,
+      p10: percentile(0.1),
+      q1: percentile(0.25),
+      median: percentile(0.5),
+      q3: percentile(0.75),
+      p90: percentile(0.9),
+      max: sorted[len - 1] ?? 0
+    };
+  }
+  function renderPercentileChart(containerId, rows, key) {
+    const container = $(containerId);
+    container.innerHTML = "";
+    if (!rows.length) {
+      container.textContent = "No data for selected range.";
+      return;
+    }
+    const values = rows.map((r) => {
+      const val = r[key];
+      if (key === "jitter_ms") {
+        return val ?? 0;
+      }
+      return val;
+    }).filter((v) => Number.isFinite(v));
+    if (values.length === 0) {
+      container.textContent = "No valid data.";
+      return;
+    }
+    const stats = calculatePercentiles(values);
+    const svgNS = "http://www.w3.org/2000/svg";
+    const width = 300;
+    const height = 50;
+    const paddingX = 12;
+    const paddingY = 8;
+    const paddingBottom = 12;
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    let minY = Math.min(stats.min, stats.p10);
+    let maxY = Math.max(stats.max, stats.p90);
+    if (minY === maxY) {
+      const delta = minY === 0 ? 1 : minY * 0.1;
+      minY -= delta;
+      maxY += delta;
+    }
+    const innerW = width - paddingX * 2;
+    const innerH = height - paddingY - paddingBottom;
+    const yPos = (val) => {
+      const yNorm = maxY === minY ? 0.5 : (val - minY) / (maxY - minY);
+      return paddingY + innerH - yNorm * innerH;
+    };
+    const gridLines = 3;
+    for (let i = 0; i <= gridLines; i++) {
+      const yPos2 = paddingY + innerH / gridLines * i;
+      const grid = document.createElementNS(svgNS, "line");
+      grid.setAttribute("x1", paddingX.toString());
+      grid.setAttribute("x2", (width - paddingX).toString());
+      grid.setAttribute("y1", yPos2.toString());
+      grid.setAttribute("y2", yPos2.toString());
+      grid.setAttribute("stroke", "rgba(255,255,255,0.08)");
+      grid.setAttribute("stroke-width", "0.3");
+      svg.appendChild(grid);
+      const value = maxY - (maxY - minY) * (i / gridLines);
+      const text = document.createElementNS(svgNS, "text");
+      text.setAttribute("x", (paddingX - 2).toString());
+      text.setAttribute("y", (yPos2 + 1.5).toString());
+      text.setAttribute("text-anchor", "end");
+      text.setAttribute("fill", "rgba(255,255,255,0.4)");
+      text.setAttribute("font-size", "2.5");
+      text.textContent = formatNumber(value, 1);
+      svg.appendChild(text);
+    }
+    const centerX = width / 2;
+    const boxWidth = innerW * 0.4;
+    const whisker = (y1, y2, x) => {
+      const line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", x.toString());
+      line.setAttribute("x2", x.toString());
+      line.setAttribute("y1", y1.toString());
+      line.setAttribute("y2", y2.toString());
+      line.setAttribute("stroke", "rgba(255,255,255,0.5)");
+      line.setAttribute("stroke-width", "0.4");
+      svg.appendChild(line);
+    };
+    whisker(yPos(stats.min), yPos(stats.p10), centerX);
+    whisker(yPos(stats.p90), yPos(stats.max), centerX);
+    const boxY1 = yPos(stats.q3);
+    const boxY2 = yPos(stats.q1);
+    const box = document.createElementNS(svgNS, "rect");
+    box.setAttribute("x", (centerX - boxWidth / 2).toString());
+    box.setAttribute("y", boxY1.toString());
+    box.setAttribute("width", boxWidth.toString());
+    box.setAttribute("height", (boxY2 - boxY1).toString());
+    box.setAttribute("fill", "rgba(255,179,65,0.2)");
+    box.setAttribute("stroke", "rgba(255,179,65,0.6)");
+    box.setAttribute("stroke-width", "0.5");
+    svg.appendChild(box);
+    const medianY = yPos(stats.median);
+    const medianLine = document.createElementNS(svgNS, "line");
+    medianLine.setAttribute("x1", (centerX - boxWidth / 2).toString());
+    medianLine.setAttribute("x2", (centerX + boxWidth / 2).toString());
+    medianLine.setAttribute("y1", medianY.toString());
+    medianLine.setAttribute("y2", medianY.toString());
+    medianLine.setAttribute("stroke", "#ffb341");
+    medianLine.setAttribute("stroke-width", "1");
+    svg.appendChild(medianLine);
+    const markers = [
+      { val: stats.min, label: "Min", color: "rgba(255,255,255,0.6)" },
+      { val: stats.p10, label: "P10", color: "rgba(255,255,255,0.5)" },
+      { val: stats.q1, label: "Q1", color: "rgba(255,179,65,0.7)" },
+      { val: stats.median, label: "Med", color: "#ffb341" },
+      { val: stats.q3, label: "Q3", color: "rgba(255,179,65,0.7)" },
+      { val: stats.p90, label: "P90", color: "rgba(255,255,255,0.5)" },
+      { val: stats.max, label: "Max", color: "rgba(255,255,255,0.6)" }
+    ];
+    markers.forEach((m) => {
+      const y = yPos(m.val);
+      const circle = document.createElementNS(svgNS, "circle");
+      circle.setAttribute("cx", centerX.toString());
+      circle.setAttribute("cy", y.toString());
+      circle.setAttribute("r", "1");
+      circle.setAttribute("fill", m.color);
+      svg.appendChild(circle);
+    });
+    const statsText = document.createElementNS(svgNS, "text");
+    statsText.setAttribute("x", centerX.toString());
+    statsText.setAttribute("y", (height - paddingBottom + 6).toString());
+    statsText.setAttribute("text-anchor", "middle");
+    statsText.setAttribute("fill", "rgba(255,255,255,0.5)");
+    statsText.setAttribute("font-size", "2.2");
+    statsText.textContent = `Med: ${formatNumber(stats.median, 1)} | Q1: ${formatNumber(stats.q1, 1)} | Q3: ${formatNumber(stats.q3, 1)}`;
+    svg.appendChild(statsText);
+    container.appendChild(svg);
+  }
   async function updateDownloadChart() {
     const select = $("range-download");
+    const toggle = $("chart-type-download");
     const value = select.value || "24h";
     const rows = await loadHistoryForRange(value);
-    renderLineChart("download-chart", rows, "download_mbps");
+    if (toggle?.classList.contains("active")) {
+      renderPercentileChart("download-chart", rows, "download_mbps");
+    } else {
+      renderLineChart("download-chart", rows, "download_mbps");
+    }
   }
   async function updateUploadChart() {
     const select = $("range-upload");
+    const toggle = $("chart-type-upload");
     const value = select.value || "24h";
     const rows = await loadHistoryForRange(value);
-    renderLineChart("upload-chart", rows, "upload_mbps");
+    if (toggle?.classList.contains("active")) {
+      renderPercentileChart("upload-chart", rows, "upload_mbps");
+    } else {
+      renderLineChart("upload-chart", rows, "upload_mbps");
+    }
   }
   async function updateLatencyChart() {
     const select = $("range-latency");
+    const toggle = $("chart-type-latency");
     const value = select.value || "24h";
     const rows = await loadHistoryForRange(value);
-    renderLineChart("latency-chart", rows, "ping_ms");
+    if (toggle?.classList.contains("active")) {
+      renderPercentileChart("latency-chart", rows, "ping_ms");
+    } else {
+      renderLineChart("latency-chart", rows, "ping_ms");
+    }
   }
   async function updateJitterChart() {
     const select = $("range-jitter");
+    const toggle = $("chart-type-jitter");
     const value = select.value || "24h";
     const rows = await loadHistoryForRange(value);
-    renderLineChart("jitter-chart", rows, "jitter_ms");
+    if (toggle?.classList.contains("active")) {
+      renderPercentileChart("jitter-chart", rows, "jitter_ms");
+    } else {
+      renderLineChart("jitter-chart", rows, "jitter_ms");
+    }
   }
   var editingScheduleId = null;
   async function loadSchedules() {
@@ -555,6 +720,10 @@
     const u = $("range-upload");
     const l = $("range-latency");
     const j = $("range-jitter");
+    const dt = $("chart-type-download");
+    const ut = $("chart-type-upload");
+    const lt = $("chart-type-latency");
+    const jt = $("chart-type-jitter");
     d.addEventListener("change", () => {
       updateDownloadChart().catch(
         (err) => console.error("updateDownloadChart", err)
@@ -571,6 +740,30 @@
       );
     });
     j.addEventListener("change", () => {
+      updateJitterChart().catch(
+        (err) => console.error("updateJitterChart", err)
+      );
+    });
+    dt?.addEventListener("click", () => {
+      dt.classList.toggle("active");
+      updateDownloadChart().catch(
+        (err) => console.error("updateDownloadChart", err)
+      );
+    });
+    ut?.addEventListener("click", () => {
+      ut.classList.toggle("active");
+      updateUploadChart().catch(
+        (err) => console.error("updateUploadChart", err)
+      );
+    });
+    lt?.addEventListener("click", () => {
+      lt.classList.toggle("active");
+      updateLatencyChart().catch(
+        (err) => console.error("updateLatencyChart", err)
+      );
+    });
+    jt?.addEventListener("click", () => {
+      jt.classList.toggle("active");
       updateJitterChart().catch(
         (err) => console.error("updateJitterChart", err)
       );

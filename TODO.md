@@ -7,5 +7,5 @@
 
 - [ ] Add authentication for API/UI (optional).
 - [x] Add CSV/JSON export of history.
-- [ ] Add percentile/median charts and more advanced stats.
+- [x] Add percentile/median charts and more advanced stats.
 - [x] Improve scheduler UI (edit/delete schedules from frontend).
