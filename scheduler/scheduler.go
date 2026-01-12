@@ -12,6 +12,7 @@ import (
 )
 
 type Runner func(ctx context.Context) (*model.SpeedtestResult, error)
+type OnComplete func(result *model.SpeedtestResult) // Called when a speedtest completes
 
 type Scheduler struct {
 	mu        sync.Mutex
@@ -19,6 +20,7 @@ type Scheduler struct {
 	lastRun   map[string]time.Time
 	runner    Runner
 	onUpdate  func() // Called when lastRun changes
+	onComplete OnComplete // Called when a speedtest completes
 }
 
 func New(runner Runner, initial []model.Schedule, lastRun map[string]time.Time) *Scheduler {
@@ -30,6 +32,7 @@ func New(runner Runner, initial []model.Schedule, lastRun map[string]time.Time) 
 		lastRun:   lastRun,
 		runner:    runner,
 		onUpdate:  nil,
+		onComplete: nil,
 	}
 	return s
 }
@@ -38,6 +41,12 @@ func (s *Scheduler) SetOnUpdate(fn func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onUpdate = fn
+}
+
+func (s *Scheduler) SetOnComplete(fn OnComplete) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onComplete = fn
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
@@ -82,7 +91,7 @@ func (s *Scheduler) check(ctx context.Context, now time.Time) {
 }
 
 func (s *Scheduler) runOnce(ctx context.Context, id string, now time.Time) {
-	_, err := s.runner(ctx)
+	result, err := s.runner(ctx)
 	if err != nil {
 		log.Printf("[scheduler] run %s failed: %v", id, err)
 		return
@@ -90,9 +99,13 @@ func (s *Scheduler) runOnce(ctx context.Context, id string, now time.Time) {
 	s.mu.Lock()
 	s.lastRun[id] = now
 	onUpdate := s.onUpdate
+	onComplete := s.onComplete
 	s.mu.Unlock()
 	if onUpdate != nil {
 		onUpdate()
+	}
+	if onComplete != nil && result != nil {
+		onComplete(result)
 	}
 }
 

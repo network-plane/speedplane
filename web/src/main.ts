@@ -85,21 +85,6 @@ function formatDateTime(date: Date): string {
 async function loadSummary(): Promise<void> {
   const data = await fetchJSON<SummaryResponse>("/api/summary");
 
-  // Check if a new result was added (for scheduled tests)
-  if (data.latest && data.latest.timestamp) {
-    if (lastResultTimestamp && lastResultTimestamp !== data.latest.timestamp) {
-      // New result detected, refresh all charts
-      await Promise.all([
-        loadHistoryTable(),
-        updateDownloadChart(),
-        updateUploadChart(),
-        updateLatencyChart(),
-        updateJitterChart(),
-      ]);
-    }
-    lastResultTimestamp = data.latest.timestamp;
-  }
-
   if (data.latest) {
     $("latest-download-value").textContent = formatNumber(
       data.latest.download_mbps,
@@ -1087,8 +1072,7 @@ function setupThemeSelection(): void {
 let scheduleTimerInterval: number | null = null;
 let nextRunTime: number | null = null;
 let intervalDuration: number | null = null;
-let lastResultTimestamp: string | null = null;
-let resultPollInterval: number | null = null;
+let ws: WebSocket | null = null;
 
 async function updateScheduleTimer(): Promise<void> {
   try {
@@ -1167,14 +1151,56 @@ function startScheduleTimer(): void {
   }, 1000);
 }
 
-function startResultPolling(): void {
-  // Poll for new results every 10 seconds to detect scheduled speedtests
-  if (resultPollInterval) {
-    clearInterval(resultPollInterval);
+function connectWebSocket(): void {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+  try {
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      console.log("WebSocket connected");
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "speedtest-complete") {
+          // New speedtest completed, refresh all data
+          Promise.all([
+            loadSummary(),
+            loadHistoryTable(),
+            updateDownloadChart(),
+            updateUploadChart(),
+            updateLatencyChart(),
+            updateJitterChart(),
+          ]).catch((err) => console.error("refresh after speedtest failed", err));
+        } else if (data.type === "ping") {
+          // Keep-alive ping, no action needed
+        } else if (data.type === "status") {
+          // Connection status, no action needed
+        }
+      } catch (err) {
+        console.error("WebSocket message parse error:", err);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+    };
+
+    ws.onclose = () => {
+      console.log("WebSocket disconnected, reconnecting...");
+      ws = null;
+      // Reconnect after 2 seconds
+      setTimeout(connectWebSocket, 2000);
+    };
+  } catch (err) {
+    console.error("Failed to create WebSocket:", err);
+    // Retry after 2 seconds
+    setTimeout(connectWebSocket, 2000);
   }
-  resultPollInterval = window.setInterval(() => {
-    loadSummary().catch((err) => console.error("poll summary failed", err));
-  }, 10000);
 }
 
 /* ---------- INIT ---------- */
@@ -1186,7 +1212,7 @@ async function init(): Promise<void> {
   setupRangeSelectors();
   setupThemeSelection();
   startScheduleTimer();
-  startResultPolling();
+  connectWebSocket();
 
   await Promise.all([
     loadSummary(),

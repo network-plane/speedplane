@@ -40,18 +40,6 @@
   }
   async function loadSummary() {
     const data = await fetchJSON("/api/summary");
-    if (data.latest && data.latest.timestamp) {
-      if (lastResultTimestamp && lastResultTimestamp !== data.latest.timestamp) {
-        await Promise.all([
-          loadHistoryTable(),
-          updateDownloadChart(),
-          updateUploadChart(),
-          updateLatencyChart(),
-          updateJitterChart()
-        ]);
-      }
-      lastResultTimestamp = data.latest.timestamp;
-    }
     if (data.latest) {
       $("latest-download-value").textContent = formatNumber(
         data.latest.download_mbps
@@ -825,8 +813,7 @@
   var scheduleTimerInterval = null;
   var nextRunTime = null;
   var intervalDuration = null;
-  var lastResultTimestamp = null;
-  var resultPollInterval = null;
+  var ws = null;
   async function updateScheduleTimer() {
     try {
       const data = await fetchJSON("/api/next-run");
@@ -888,13 +875,45 @@
       }
     }, 1e3);
   }
-  function startResultPolling() {
-    if (resultPollInterval) {
-      clearInterval(resultPollInterval);
+  function connectWebSocket() {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        console.log("WebSocket connected");
+      };
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "speedtest-complete") {
+            Promise.all([
+              loadSummary(),
+              loadHistoryTable(),
+              updateDownloadChart(),
+              updateUploadChart(),
+              updateLatencyChart(),
+              updateJitterChart()
+            ]).catch((err) => console.error("refresh after speedtest failed", err));
+          } else if (data.type === "ping") {
+          } else if (data.type === "status") {
+          }
+        } catch (err) {
+          console.error("WebSocket message parse error:", err);
+        }
+      };
+      ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+      };
+      ws.onclose = () => {
+        console.log("WebSocket disconnected, reconnecting...");
+        ws = null;
+        setTimeout(connectWebSocket, 2e3);
+      };
+    } catch (err) {
+      console.error("Failed to create WebSocket:", err);
+      setTimeout(connectWebSocket, 2e3);
     }
-    resultPollInterval = window.setInterval(() => {
-      loadSummary().catch((err) => console.error("poll summary failed", err));
-    }, 1e4);
   }
   async function init() {
     setupNav();
@@ -903,7 +922,7 @@
     setupRangeSelectors();
     setupThemeSelection();
     startScheduleTimer();
-    startResultPolling();
+    connectWebSocket();
     await Promise.all([
       loadSummary(),
       loadHistoryTable(),

@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"speedplane/model"
 	"speedplane/scheduler"
 	"speedplane/storage"
@@ -69,6 +71,7 @@ type Server struct {
 	sched        *scheduler.Scheduler
 	progress     *progressTracker
 	saveConfig   func()
+	wsManager    *WSConnectionManager
 }
 
 func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithProgressFunc, sched *scheduler.Scheduler, saveConfig func()) *Server {
@@ -79,6 +82,7 @@ func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithPro
 		sched:          sched,
 		progress:       newProgressTracker(),
 		saveConfig:     saveConfig,
+		wsManager:      NewWSConnectionManager(),
 	}
 }
 
@@ -97,6 +101,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/export/history.csv", s.handleExportHistoryCSV)
 	mux.HandleFunc("/api/export/current.json", s.handleExportCurrentJSON)
 	mux.HandleFunc("/api/export/current.csv", s.handleExportCurrentCSV)
+	mux.HandleFunc("/ws", s.handleWebSocket)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -898,4 +903,83 @@ func (s *Server) handleExportCurrentCSV(w http.ResponseWriter, r *http.Request) 
 		log.Printf("write CSV row error: %v", err)
 		return
 	}
+}
+
+// ---------- WebSocket handler ----------
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow all origins for now
+	},
+}
+
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("WebSocket upgrade error: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	// Register connection with manager
+	s.wsManager.Add(conn)
+	defer s.wsManager.Remove(conn)
+
+	log.Printf("WebSocket client connected from %s", r.RemoteAddr)
+
+	// Send initial status
+	if err := s.wsManager.WriteJSON(conn, map[string]interface{}{
+		"type":   "status",
+		"status": "online",
+	}); err != nil {
+		log.Printf("WebSocket write error: %v", err)
+		return
+	}
+
+	// Set up ping/pong
+	pingTicker := time.NewTicker(30 * time.Second)
+	defer pingTicker.Stop()
+
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
+	// Read goroutine to handle incoming messages and detect disconnects
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					log.Printf("WebSocket error: %v", err)
+				}
+				return
+			}
+		}
+	}()
+
+	// Main loop: send pings and handle disconnects
+	for {
+		select {
+		case <-done:
+			return
+		case <-pingTicker.C:
+			if err := s.wsManager.WriteJSON(conn, map[string]string{"type": "ping"}); err != nil {
+				log.Printf("WebSocket ping error: %v", err)
+				return
+			}
+		}
+	}
+}
+
+// BroadcastSpeedtestComplete broadcasts when a scheduled speedtest completes
+func (s *Server) BroadcastSpeedtestComplete(result *model.SpeedtestResult) {
+	s.wsManager.Broadcast(map[string]interface{}{
+		"type":    "speedtest-complete",
+		"result":  result,
+		"message": "New speedtest result available",
+	})
 }

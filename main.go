@@ -120,7 +120,6 @@ func run(cmd *cobra.Command, args []string) {
 		}
 	}
 	sched.SetOnUpdate(saveConfig)
-	sched.Start(ctx)
 
 	// Initialize theme manager
 	themeManager, err := theme.NewManager(templatesFS)
@@ -151,7 +150,14 @@ func run(cmd *cobra.Command, args []string) {
 	}
 
 	apiServer := api.NewServer(store, runAndSave, runWithProgress, sched, saveConfig)
+
+	// Broadcast when scheduled speedtests complete
+	sched.SetOnComplete(func(result *model.SpeedtestResult) {
+		apiServer.BroadcastSpeedtestComplete(result)
+	})
+
 	apiServer.Register(mux)
+	sched.Start(ctx)
 
 	// Theme API endpoints
 	mux.HandleFunc("/api/theme", themeHandler.HandleTheme)
