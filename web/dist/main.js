@@ -56,11 +56,14 @@
         1
       );
       $("latest-jitter-sub").textContent = "ms";
-      $("latest-packetloss-value").textContent = formatNumber(
-        data.latest.packet_loss_pct ?? 0,
-        2
-      );
-      $("latest-packetloss-sub").textContent = "%";
+      const packetLoss = data.latest.packet_loss_pct ?? -1;
+      if (packetLoss < 0) {
+        $("latest-packetloss-value").textContent = "\u2014";
+        $("latest-packetloss-sub").textContent = "";
+      } else {
+        $("latest-packetloss-value").textContent = formatNumber(packetLoss, 2);
+        $("latest-packetloss-sub").textContent = "%";
+      }
     }
   }
   async function loadHistoryTable() {
@@ -81,7 +84,7 @@
       <td>${formatNumber(r.upload_mbps)}</td>
       <td>${formatNumber(r.ping_ms, 1)}</td>
       <td>${formatNumber(r.jitter_ms ?? 0, 1)}</td>
-      <td>${formatNumber(r.packet_loss_pct ?? 0, 2)}</td>
+      <td>${(r.packet_loss_pct ?? -1) < 0 ? "\u2014" : formatNumber(r.packet_loss_pct ?? 0, 2)}</td>
       <td style="font-family: monospace; font-size: 12px;">${r.external_ip || "\u2013"}</td>
       <td>${r.isp || "\u2013"}</td>
       <td>${serverInfo}</td>
