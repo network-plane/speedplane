@@ -15,7 +15,7 @@ all: build
 
 build: frontend backend
 
-frontend: $(JS_BUNDLE) $(WEB_DIST)/index.html $(WEB_DIST)/styles.css
+frontend: $(JS_BUNDLE) $(WEB_DIST)/index.html
 
 $(JS_BUNDLE): $(JS_ENTRY)
 	mkdir -p $(WEB_DIST)
@@ -24,10 +24,6 @@ $(JS_BUNDLE): $(JS_ENTRY)
 $(WEB_DIST)/index.html: $(WEB_SRC)/index.html
 	mkdir -p $(WEB_DIST)
 	cp $(WEB_SRC)/index.html $(WEB_DIST)/
-
-$(WEB_DIST)/styles.css: $(WEB_SRC)/styles.css
-	mkdir -p $(WEB_DIST)
-	cp $(WEB_SRC)/styles.css $(WEB_DIST)/
 
 backend:
 	$(GO) build -o $(BIN_NAME) .

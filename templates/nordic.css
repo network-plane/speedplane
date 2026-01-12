@@ -63,6 +63,24 @@ Border: true
 }
 *{box-sizing:border-box}
 html,body{height:100%}
+.card-compare{
+  font-size:11px;
+  margin-top:4px;
+  display:flex;
+  align-items:center;
+  gap:4px;
+  min-height:16px;
+}
+.card-compare.slower{
+  color:var(--severity-error,#ff4b4b);
+}
+.card-compare.faster{
+  color:var(--severity-success,#4ade80);
+}
+.card-compare .arrow{
+  font-size:10px;
+  display:inline-block;
+}
 body{
   margin:0;
   font:14px/1.35 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
