@@ -47,6 +47,19 @@ var rootCmd = &cobra.Command{
 	Run:   run,
 }
 
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Configuration management",
+	Long:  "Manage speedplane configuration files.",
+}
+
+var configGenerateCmd = &cobra.Command{
+	Use:   "generate",
+	Short: "Generate a default configuration file",
+	Long:  "Generate a default speedplane.config file in the specified data directory (or current directory if not specified).",
+	Run:   runConfigGenerate,
+}
+
 func init() {
 	wd, _ := os.Getwd()
 	rootCmd.Version = appVersion
@@ -54,6 +67,10 @@ func init() {
 	rootCmd.Flags().StringVar(&listen, "listen", "all", "IP address to listen on (default: all)")
 	rootCmd.Flags().IntVar(&listenPort, "listen-port", 8080, "Port to listen on (default: 8080)")
 	rootCmd.Flags().BoolVar(&public, "public", false, "Enable public dashboard access")
+
+	configGenerateCmd.Flags().StringVar(&dataDir, "data-dir", wd, "Data directory where config file will be created (default: current directory)")
+	configCmd.AddCommand(configGenerateCmd)
+	rootCmd.AddCommand(configCmd)
 }
 
 func run(cmd *cobra.Command, args []string) {
@@ -63,15 +80,26 @@ func run(cmd *cobra.Command, args []string) {
 		log.Fatalf("load config: %v", err)
 	}
 
-	// Override config with CLI flags
-	cfg.DataDir = dataDir
-	if listen != "" && listen != "all" {
-		cfg.ListenAddr = fmt.Sprintf("%s:%d", listen, listenPort)
-	} else {
-		// Listen on all interfaces
-		cfg.ListenAddr = fmt.Sprintf(":%d", listenPort)
+	// Override config with CLI flags only if they were explicitly provided
+	if cmd.Flags().Changed("data-dir") {
+		cfg.DataDir = dataDir
+	} else if cfg.DataDir != "" && cfg.DataDir != "." {
+		// If data-dir flag wasn't provided but config file specifies one, use it
+		dataDir = cfg.DataDir
+		cfg.DataDir = dataDir
 	}
-	cfg.PublicDashboard = public
+	
+	if cmd.Flags().Changed("listen") || cmd.Flags().Changed("listen-port") {
+		if listen != "" && listen != "all" {
+			cfg.ListenAddr = fmt.Sprintf("%s:%d", listen, listenPort)
+		} else {
+			// Listen on all interfaces
+			cfg.ListenAddr = fmt.Sprintf(":%d", listenPort)
+		}
+	}
+	if cmd.Flags().Changed("public") {
+		cfg.PublicDashboard = public
+	}
 
 	// Ensure data directory exists and is absolute
 	dataDirAbs, err := filepath.Abs(cfg.DataDir)
@@ -256,6 +284,31 @@ func run(cmd *cobra.Command, args []string) {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("server shutdown: %v", err)
 	}
+}
+
+func runConfigGenerate(cmd *cobra.Command, args []string) {
+	// Ensure data directory exists and is absolute
+	dataDirAbs, err := filepath.Abs(dataDir)
+	if err != nil {
+		log.Fatalf("resolve data dir: %v", err)
+	}
+
+	// Create default config
+	cfg := config.Default()
+	cfg.DataDir = dataDirAbs
+
+	// Check if config file already exists
+	cfgPath := filepath.Join(dataDirAbs, "speedplane.config")
+	if _, err := os.Stat(cfgPath); err == nil {
+		log.Fatalf("config file already exists: %s", cfgPath)
+	}
+
+	// Save default config
+	if err := config.Save(cfg); err != nil {
+		log.Fatalf("failed to save config: %v", err)
+	}
+
+	fmt.Printf("Generated default config file: %s\n", cfgPath)
 }
 
 func printListeningAddresses(addr string) {
