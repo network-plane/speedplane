@@ -85,6 +85,21 @@ function formatDateTime(date: Date): string {
 async function loadSummary(): Promise<void> {
   const data = await fetchJSON<SummaryResponse>("/api/summary");
 
+  // Check if a new result was added (for scheduled tests)
+  if (data.latest && data.latest.timestamp) {
+    if (lastResultTimestamp && lastResultTimestamp !== data.latest.timestamp) {
+      // New result detected, refresh all charts
+      await Promise.all([
+        loadHistoryTable(),
+        updateDownloadChart(),
+        updateUploadChart(),
+        updateLatencyChart(),
+        updateJitterChart(),
+      ]);
+    }
+    lastResultTimestamp = data.latest.timestamp;
+  }
+
   if (data.latest) {
     $("latest-download-value").textContent = formatNumber(
       data.latest.download_mbps,
@@ -576,6 +591,9 @@ async function loadSchedules(): Promise<void> {
   const list = $("schedules-list");
   list.innerHTML = "";
 
+  // Refresh timer when schedules change
+  updateScheduleTimer();
+
   if (!scheds.length) {
     list.textContent = "No schedules configured yet.";
     return;
@@ -751,6 +769,8 @@ function setupRunNow(): void {
         loadHistoryTable(),
         updateDownloadChart(),
         updateUploadChart(),
+        updateLatencyChart(),
+        updateJitterChart(),
       ]);
     } catch (err) {
       console.error("run-now failed", err);
@@ -1101,6 +1121,101 @@ function setupThemeSelection(): void {
   });
 }
 
+/* ---------- SCHEDULE TIMER ---------- */
+
+let scheduleTimerInterval: number | null = null;
+let nextRunTime: number | null = null;
+let intervalDuration: number | null = null;
+let lastResultTimestamp: string | null = null;
+let resultPollInterval: number | null = null;
+
+async function updateScheduleTimer(): Promise<void> {
+  try {
+    const data = await fetchJSON<{
+      next_run: string | null;
+      remaining: number;
+      timestamp: number;
+    }>("/api/next-run");
+
+    const timerEl = document.getElementById("schedule-timer");
+    if (!timerEl) return;
+
+    if (!data.next_run) {
+      timerEl.style.display = "none";
+      if (scheduleTimerInterval) {
+        clearInterval(scheduleTimerInterval);
+        scheduleTimerInterval = null;
+      }
+      return;
+    }
+
+    timerEl.style.display = "block";
+    nextRunTime = new Date(data.next_run).getTime();
+    intervalDuration = data.remaining * 1000;
+    updateTimerDisplay();
+  } catch (err) {
+    console.error("Failed to fetch next run time:", err);
+  }
+}
+
+function updateTimerDisplay(): void {
+  const timerEl = document.getElementById("schedule-timer");
+  if (!timerEl || !nextRunTime || !intervalDuration) return;
+
+  const now = Date.now();
+  const elapsed = now - (nextRunTime - intervalDuration);
+  const remaining = Math.max(0, nextRunTime - now);
+  const percent = Math.min(100, Math.max(0, (elapsed / intervalDuration) * 100));
+
+  const totalSeconds = Math.ceil(remaining / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+
+  const timeStr = parts.join(" ");
+
+  if (remaining > 0) {
+    timerEl.title = `Next speedtest in ${timeStr}`;
+    timerEl.classList.remove("paused");
+    timerEl.style.setProperty("--progress-percent", percent + "%");
+  } else {
+    timerEl.title = "Ready to run (checking schedules...)";
+    timerEl.classList.add("paused");
+    timerEl.style.setProperty("--progress-percent", "100%");
+  }
+}
+
+function startScheduleTimer(): void {
+  updateScheduleTimer();
+  if (scheduleTimerInterval) {
+    clearInterval(scheduleTimerInterval);
+  }
+  scheduleTimerInterval = window.setInterval(() => {
+    updateTimerDisplay();
+    // Refresh next run time every 30 seconds
+    if (Date.now() % 30000 < 1000) {
+      updateScheduleTimer();
+    }
+  }, 1000);
+}
+
+function startResultPolling(): void {
+  // Poll for new results every 10 seconds to detect scheduled speedtests
+  if (resultPollInterval) {
+    clearInterval(resultPollInterval);
+  }
+  resultPollInterval = window.setInterval(() => {
+    loadSummary().catch((err) => console.error("poll summary failed", err));
+  }, 10000);
+}
+
 /* ---------- INIT ---------- */
 
 async function init(): Promise<void> {
@@ -1109,6 +1224,8 @@ async function init(): Promise<void> {
   setupScheduleForm();
   setupRangeSelectors();
   setupThemeSelection();
+  startScheduleTimer();
+  startResultPolling();
 
   await Promise.all([
     loadSummary(),

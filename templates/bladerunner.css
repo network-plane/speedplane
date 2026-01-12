@@ -330,6 +330,9 @@ a{color:inherit}
   filter:drop-shadow(0 0 8px var(--glow));
 }
 .timer-circle{
+.header .timer-circle{
+  margin-left:auto;
+}
   width:14px;
   height:14px;
   border-radius:50%;

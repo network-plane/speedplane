@@ -85,9 +85,12 @@ func run(cmd *cobra.Command, args []string) {
 		log.Fatalf("ensure data dir: %v", err)
 	}
 
-	schedules, err := store.LoadSchedules()
-	if err != nil {
-		log.Fatalf("load schedules: %v", err)
+	// Load schedules and lastRun from config
+	if cfg.Schedules == nil {
+		cfg.Schedules = []model.Schedule{}
+	}
+	if cfg.LastRun == nil {
+		cfg.LastRun = make(map[string]time.Time)
 	}
 
 	runner := speedtest.NewRunner()
@@ -106,7 +109,17 @@ func run(cmd *cobra.Command, args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	sched := scheduler.New(runAndSave, schedules)
+	sched := scheduler.New(runAndSave, cfg.Schedules, cfg.LastRun)
+
+	// Save config when schedules or lastRun change
+	saveConfig := func() {
+		cfg.Schedules = sched.Schedules()
+		cfg.LastRun = sched.LastRun()
+		if err := config.Save(cfg); err != nil {
+			log.Printf("failed to save config: %v", err)
+		}
+	}
+	sched.SetOnUpdate(saveConfig)
 	sched.Start(ctx)
 
 	// Initialize theme manager
@@ -137,7 +150,7 @@ func run(cmd *cobra.Command, args []string) {
 		return res, nil
 	}
 
-	apiServer := api.NewServer(store, runAndSave, runWithProgress, sched)
+	apiServer := api.NewServer(store, runAndSave, runWithProgress, sched, saveConfig)
 	apiServer.Register(mux)
 
 	// Theme API endpoints

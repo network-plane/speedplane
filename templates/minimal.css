@@ -274,12 +274,14 @@ a{color:inherit}
   border-radius:50%;
   border:2px solid var(--border);
   background:var(--panel);
-  margin-left:auto;
   cursor:pointer;
   position:relative;
   transition:all 0.2s ease;
   flex-shrink:0;
   overflow:hidden;
+}
+.header .timer-circle{
+  margin-left:auto;
 }
 .timer-circle:hover{
   border-color:var(--accent);

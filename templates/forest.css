@@ -342,6 +342,9 @@ a{color:inherit}
   color:var(--accent);
 }
 .timer-circle{
+.header .timer-circle{
+  margin-left:auto;
+}
   width:14px;
   height:14px;
   border-radius:50%;

@@ -417,6 +417,9 @@
     const scheds = await fetchJSON("/api/schedules");
     const list = $("schedules-list");
     list.innerHTML = "";
+    if (scheduleTimerInterval) {
+      updateScheduleTimer();
+    }
     if (!scheds.length) {
       list.textContent = "No schedules configured yet.";
       return;
@@ -848,12 +851,77 @@
       await applyTheme(template, newScheme);
     });
   }
+  var scheduleTimerInterval = null;
+  var nextRunTime = null;
+  var intervalDuration = null;
+  async function updateScheduleTimer() {
+    try {
+      const data = await fetchJSON("/api/next-run");
+      const timerEl = document.getElementById("schedule-timer");
+      if (!timerEl) return;
+      if (!data.next_run) {
+        timerEl.style.display = "none";
+        if (scheduleTimerInterval) {
+          clearInterval(scheduleTimerInterval);
+          scheduleTimerInterval = null;
+        }
+        return;
+      }
+      timerEl.style.display = "block";
+      nextRunTime = new Date(data.next_run).getTime();
+      intervalDuration = data.remaining * 1e3;
+      updateTimerDisplay();
+    } catch (err) {
+      console.error("Failed to fetch next run time:", err);
+    }
+  }
+  function updateTimerDisplay() {
+    const timerEl = document.getElementById("schedule-timer");
+    if (!timerEl || !nextRunTime || !intervalDuration) return;
+    const now = Date.now();
+    const elapsed = now - (nextRunTime - intervalDuration);
+    const remaining = Math.max(0, nextRunTime - now);
+    const percent = Math.min(100, Math.max(0, elapsed / intervalDuration * 100));
+    const totalSeconds = Math.ceil(remaining / 1e3);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor(totalSeconds % 86400 / 3600);
+    const minutes = Math.floor(totalSeconds % 3600 / 60);
+    const seconds = totalSeconds % 60;
+    const parts = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+    const timeStr = parts.join(" ");
+    if (remaining > 0) {
+      timerEl.title = `Next speedtest in ${timeStr}`;
+      timerEl.classList.remove("paused");
+      timerEl.style.setProperty("--progress-percent", percent + "%");
+    } else {
+      timerEl.title = "Ready to run (checking schedules...)";
+      timerEl.classList.add("paused");
+      timerEl.style.setProperty("--progress-percent", "100%");
+    }
+  }
+  function startScheduleTimer() {
+    updateScheduleTimer();
+    if (scheduleTimerInterval) {
+      clearInterval(scheduleTimerInterval);
+    }
+    scheduleTimerInterval = window.setInterval(() => {
+      updateTimerDisplay();
+      if (Date.now() % 3e4 < 1e3) {
+        updateScheduleTimer();
+      }
+    }, 1e3);
+  }
   async function init() {
     setupNav();
     setupRunNow();
     setupScheduleForm();
     setupRangeSelectors();
     setupThemeSelection();
+    startScheduleTimer();
     await Promise.all([
       loadSummary(),
       loadHistoryTable(),

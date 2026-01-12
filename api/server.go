@@ -67,15 +67,17 @@ type Server struct {
 	runWithProgress RunWithProgressFunc
 	sched        *scheduler.Scheduler
 	progress     *progressTracker
+	saveConfig   func()
 }
 
-func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithProgressFunc, sched *scheduler.Scheduler) *Server {
+func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithProgressFunc, sched *scheduler.Scheduler, saveConfig func()) *Server {
 	return &Server{
 		store:          store,
 		runSpeedtest:   runFn,
 		runWithProgress: runWithProgressFn,
 		sched:          sched,
 		progress:       newProgressTracker(),
+		saveConfig:     saveConfig,
 	}
 }
 
@@ -88,6 +90,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/run/progress/", s.handleRunProgress)
 	mux.HandleFunc("/api/schedules", s.handleSchedules)
 	mux.HandleFunc("/api/schedules/", s.handleScheduleByID)
+	mux.HandleFunc("/api/next-run", s.handleNextRun)
 	mux.HandleFunc("/api/export/history.json", s.handleExportHistoryJSON)
 	mux.HandleFunc("/api/export/history.csv", s.handleExportHistoryCSV)
 	mux.HandleFunc("/api/export/current.json", s.handleExportCurrentJSON)
@@ -409,6 +412,35 @@ func mustJSON(v interface{}) string {
 	return string(b)
 }
 
+// handleNextRun returns when the next scheduled speedtest will run
+func (s *Server) handleNextRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	nextRun := s.sched.NextRunTime()
+	if nextRun == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"next_run": nil,
+		})
+		return
+	}
+
+	now := time.Now()
+	remaining := nextRun.Sub(now)
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"next_run":  nextRun.UTC().Format(time.RFC3339),
+		"remaining": int64(remaining.Seconds()),
+		"timestamp": now.Unix(),
+	})
+}
+
 // ---------- schedules API ----------
 
 func (s *Server) handleSchedules(w http.ResponseWriter, r *http.Request) {
@@ -434,11 +466,10 @@ func (s *Server) handleSchedules(w http.ResponseWriter, r *http.Request) {
 		cur := s.sched.Schedules()
 		cur = append(cur, sc)
 
-		if err := s.store.SaveSchedules(cur); err != nil {
-			http.Error(w, "failed to save schedules", http.StatusInternalServerError)
-			return
-		}
 		s.sched.SetSchedules(cur)
+		if s.saveConfig != nil {
+			s.saveConfig()
+		}
 
 		writeJSON(w, http.StatusCreated, sc)
 
@@ -488,11 +519,10 @@ func (s *Server) handleScheduleByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := s.store.SaveSchedules(cur); err != nil {
-			http.Error(w, "failed to save schedules", http.StatusInternalServerError)
-			return
-		}
 		s.sched.SetSchedules(cur)
+		if s.saveConfig != nil {
+			s.saveConfig()
+		}
 		writeJSON(w, http.StatusOK, upd)
 
 	case http.MethodDelete:
@@ -510,11 +540,10 @@ func (s *Server) handleScheduleByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := s.store.SaveSchedules(out); err != nil {
-			http.Error(w, "failed to save schedules", http.StatusInternalServerError)
-			return
-		}
 		s.sched.SetSchedules(out)
+		if s.saveConfig != nil {
+			s.saveConfig()
+		}
 		w.WriteHeader(http.StatusNoContent)
 
 	default:

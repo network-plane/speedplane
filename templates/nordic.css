@@ -228,6 +228,9 @@ a{color:inherit}
   opacity:0.85;
 }
 .timer-circle{
+.header .timer-circle{
+  margin-left:auto;
+}
   width:14px;
   height:14px;
   border-radius:50%;
