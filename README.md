@@ -147,6 +147,9 @@ data-dir/
   schedules.json
 ```
 
+## Template Subsmissions
+ - Youtube [MrPewPewLaser](https://github.com/MrPewPewLaser)
+
 ## License
 
 See LICENSE file for details.
