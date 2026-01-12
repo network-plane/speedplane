@@ -328,6 +328,42 @@ function renderLineChart(
   const innerW = width - paddingX * 2;
   const innerH = height - paddingY - paddingBottom;
 
+  // Create tooltip element (before drawing elements that need it)
+  const tooltip = document.createElement("div");
+  tooltip.style.cssText = `
+    position: fixed;
+    background: rgba(26, 26, 26, 0.95);
+    border: 1px solid var(--border, rgba(255,140,0,.25));
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--txt, #E8E8E8);
+    pointer-events: none;
+    z-index: 10000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    display: none;
+    white-space: nowrap;
+  `;
+  document.body.appendChild(tooltip);
+
+  // Helper to get metric name and unit
+  const getMetricInfo = (k: string): { name: string; unit: string } => {
+    switch (k) {
+      case "download_mbps":
+        return { name: "Download", unit: "Mbps" };
+      case "upload_mbps":
+        return { name: "Upload", unit: "Mbps" };
+      case "ping_ms":
+        return { name: "Ping", unit: "ms" };
+      case "jitter_ms":
+        return { name: "Jitter", unit: "ms" };
+      default:
+        return { name: "Value", unit: "" };
+    }
+  };
+
+  const metricInfo = getMetricInfo(key);
+
   // Draw horizontal grid lines (dimmer white)
   const gridLines = 3;
   for (let i = 0; i <= gridLines; i++) {
@@ -376,6 +412,50 @@ function renderLineChart(
     svg.appendChild(vLine);
   });
 
+  // Calculate and draw average line
+  const avgValue = values.reduce((sum, val) => sum + val, 0) / values.length;
+  if (Number.isFinite(avgValue) && avgValue >= minY && avgValue <= maxY) {
+    const avgYNorm = (avgValue - minY) / (maxY - minY);
+    const avgY = paddingY + innerH - avgYNorm * innerH;
+    
+    const avgLine = document.createElementNS(svgNS, "line");
+    avgLine.setAttribute("x1", paddingX.toString());
+    avgLine.setAttribute("x2", (width - paddingX).toString());
+    avgLine.setAttribute("y1", avgY.toString());
+    avgLine.setAttribute("y2", avgY.toString());
+    avgLine.setAttribute("stroke", "#ff4757");
+    avgLine.setAttribute("stroke-width", "0.6");
+    avgLine.setAttribute("stroke-dasharray", "2,2");
+    avgLine.setAttribute("opacity", "0.8");
+    avgLine.style.cursor = "pointer";
+    
+    // Add hover event for average line tooltip
+    avgLine.addEventListener("mouseenter", (e) => {
+      const svgRect = svg.getBoundingClientRect();
+      const scaleY = svgRect.height / height;
+      const mouseX = (e as MouseEvent).clientX;
+      const y = svgRect.top + avgY * scaleY;
+      
+      tooltip.innerHTML = `
+        <div style="font-weight: 600; margin-bottom: 2px;">Average ${metricInfo.name}</div>
+        <div>${formatNumber(avgValue, 2)} ${metricInfo.unit}</div>
+        <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">Based on ${rows.length} measurement${rows.length !== 1 ? "s" : ""}</div>
+      `;
+      tooltip.style.display = "block";
+      
+      // Position tooltip above the cursor, centered horizontally
+      const tooltipRect = tooltip.getBoundingClientRect();
+      tooltip.style.left = `${mouseX - tooltipRect.width / 2}px`;
+      tooltip.style.top = `${y - tooltipRect.height - 8}px`;
+    });
+    
+    avgLine.addEventListener("mouseleave", () => {
+      tooltip.style.display = "none";
+    });
+    
+    svg.appendChild(avgLine);
+  }
+
   // Draw the data line
   const path = document.createElementNS(svgNS, "path");
   const d = coords
@@ -389,13 +469,58 @@ function renderLineChart(
   path.setAttribute("stroke-linecap", "round");
   svg.appendChild(path);
 
-  // Draw data points
-  coords.forEach((coord) => {
+
+  // Draw data points with tooltips
+  coords.forEach((coord, index) => {
     const circle = document.createElementNS(svgNS, "circle");
     circle.setAttribute("cx", coord.x.toString());
     circle.setAttribute("cy", coord.y.toString());
     circle.setAttribute("r", "1.2");
     circle.setAttribute("fill", "#ffb341");
+    circle.style.cursor = "pointer";
+    
+    // Add hover events for tooltip
+    const row = rows[index];
+    const value = values[index];
+    const date = new Date(row.timestamp);
+    
+    circle.addEventListener("mouseenter", (e) => {
+      const svgRect = svg.getBoundingClientRect();
+      const scaleX = svgRect.width / width;
+      const scaleY = svgRect.height / height;
+      
+      // Highlight the circle
+      circle.setAttribute("r", "1.4");
+      circle.setAttribute("fill", "#ffb341");
+      circle.setAttribute("stroke", "#ffd700");
+      circle.setAttribute("stroke-width", "0.5");
+      
+      tooltip.innerHTML = `
+        <div style="font-weight: 600; margin-bottom: 2px;">${metricInfo.name}</div>
+        <div>${formatNumber(value, 2)} ${metricInfo.unit}</div>
+        <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">${formatDateTime(date)}</div>
+      `;
+      tooltip.style.display = "block";
+      
+      const x = svgRect.left + coord.x * scaleX;
+      const y = svgRect.top + coord.y * scaleY;
+      
+      // Position tooltip above the point, centered horizontally
+      // Get dimensions after display
+      const tooltipRect = tooltip.getBoundingClientRect();
+      tooltip.style.left = `${x - tooltipRect.width / 2}px`;
+      tooltip.style.top = `${y - tooltipRect.height - 8}px`;
+    });
+    
+    circle.addEventListener("mouseleave", () => {
+      // Restore original circle size
+      circle.setAttribute("r", "1.2");
+      circle.setAttribute("fill", "#ffb341");
+      circle.removeAttribute("stroke");
+      circle.removeAttribute("stroke-width");
+      tooltip.style.display = "none";
+    });
+    
     svg.appendChild(circle);
   });
 
