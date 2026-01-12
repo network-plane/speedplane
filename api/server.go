@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -85,6 +86,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/summary", s.handleSummary)
 	mux.HandleFunc("/api/history", s.handleHistory)
+	mux.HandleFunc("/api/chart-data", s.handleChartData)
 	mux.HandleFunc("/api/run", s.handleRun)
 	mux.HandleFunc("/api/run/stream", s.handleRunStream)
 	mux.HandleFunc("/api/run/progress/", s.handleRunProgress)
@@ -438,6 +440,152 @@ func (s *Server) handleNextRun(w http.ResponseWriter, r *http.Request) {
 		"next_run":  nextRun.UTC().Format(time.RFC3339),
 		"remaining": int64(remaining.Seconds()),
 		"timestamp": now.Unix(),
+	})
+}
+
+// ---------- chart data API ----------
+
+type percentileStats struct {
+	Min    float64 `json:"min"`
+	P10    float64 `json:"p10"`
+	Q1     float64 `json:"q1"`
+	Median float64 `json:"median"`
+	Q3     float64 `json:"q3"`
+	P90    float64 `json:"p90"`
+	Max    float64 `json:"max"`
+}
+
+type chartDataResponse struct {
+	Data       []model.SpeedtestResult `json:"data"`
+	Stats      *percentileStats         `json:"stats,omitempty"`
+	MinValue   float64                  `json:"min_value"`
+	MaxValue   float64                  `json:"max_value"`
+}
+
+func calculatePercentiles(values []float64) percentileStats {
+	if len(values) == 0 {
+		return percentileStats{}
+	}
+
+	sorted := make([]float64, len(values))
+	copy(sorted, values)
+	sort.Float64s(sorted)
+
+	percentile := func(p float64) float64 {
+		if len(sorted) == 0 {
+			return 0
+		}
+		index := float64(len(sorted)-1) * p
+		lower := int(index)
+		upper := int(index) + 1
+		if upper >= len(sorted) {
+			upper = len(sorted) - 1
+		}
+		weight := index - float64(lower)
+		return sorted[lower]*(1-weight) + sorted[upper]*weight
+	}
+
+	return percentileStats{
+		Min:    sorted[0],
+		P10:    percentile(0.1),
+		Q1:     percentile(0.25),
+		Median: percentile(0.5),
+		Q3:     percentile(0.75),
+		P90:    percentile(0.9),
+		Max:    sorted[len(sorted)-1],
+	}
+}
+
+func (s *Server) handleChartData(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	q := r.URL.Query()
+	rangeParam := q.Get("range")
+	metric := q.Get("metric")
+
+	if rangeParam == "" {
+		http.Error(w, "range parameter required (24h, 7d, 30d)", http.StatusBadRequest)
+		return
+	}
+	if metric == "" {
+		http.Error(w, "metric parameter required (download, upload, ping, jitter)", http.StatusBadRequest)
+		return
+	}
+
+	// Calculate date range
+	now := time.Now()
+	var days int
+	switch rangeParam {
+	case "24h":
+		days = 1
+	case "7d":
+		days = 7
+	case "30d":
+		days = 30
+	default:
+		http.Error(w, "invalid range, must be 24h, 7d, or 30d", http.StatusBadRequest)
+		return
+	}
+
+	from := now.AddDate(0, 0, -days)
+	to := now
+
+	results, err := s.store.ListResults(from, to)
+	if err != nil {
+		http.Error(w, "failed to load history", http.StatusInternalServerError)
+		return
+	}
+
+	// Sort by timestamp
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Timestamp.Before(results[j].Timestamp)
+	})
+
+	// Extract values for the requested metric
+	var values []float64
+	for _, r := range results {
+		var val float64
+		switch metric {
+		case "download":
+			val = r.DownloadMbps
+		case "upload":
+			val = r.UploadMbps
+		case "ping":
+			val = r.PingMs
+		case "jitter":
+			val = r.JitterMs
+		default:
+			http.Error(w, "invalid metric, must be download, upload, ping, or jitter", http.StatusBadRequest)
+			return
+		}
+		if val >= 0 {
+			values = append(values, val)
+		}
+	}
+
+	// Calculate percentiles
+	var stats *percentileStats
+	var minVal, maxVal float64
+
+	if len(values) > 0 {
+		percentileStats := calculatePercentiles(values)
+		stats = &percentileStats
+		minVal = percentileStats.Min
+		maxVal = percentileStats.Max
+	} else {
+		minVal = 0
+		maxVal = 0
+	}
+
+	writeJSON(w, http.StatusOK, chartDataResponse{
+		Data:     results,
+		Stats:    stats,
+		MinValue: minVal,
+		MaxValue: maxVal,
 	})
 }
 

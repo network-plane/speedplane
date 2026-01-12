@@ -40,6 +40,18 @@
   }
   async function loadSummary() {
     const data = await fetchJSON("/api/summary");
+    if (data.latest && data.latest.timestamp) {
+      if (lastResultTimestamp && lastResultTimestamp !== data.latest.timestamp) {
+        await Promise.all([
+          loadHistoryTable(),
+          updateDownloadChart(),
+          updateUploadChart(),
+          updateLatencyChart(),
+          updateJitterChart()
+        ]);
+      }
+      lastResultTimestamp = data.latest.timestamp;
+    }
     if (data.latest) {
       $("latest-download-value").textContent = formatNumber(
         data.latest.download_mbps
@@ -67,9 +79,7 @@
     }
   }
   async function loadHistoryTable() {
-    const now = /* @__PURE__ */ new Date();
-    const from = new Date(now.getTime() - 24 * 60 * 60 * 1e3);
-    const url = "/api/history?from=" + encodeURIComponent(from.toISOString()) + "&to=" + encodeURIComponent(now.toISOString());
+    const url = "/api/history?range=24h";
     const rows = await fetchJSON(url);
     const tbody = $("history-table").querySelector("tbody");
     if (!tbody) return;
@@ -92,22 +102,13 @@
       tbody.appendChild(tr);
     }
   }
-  function computeRange(range) {
-    const to = /* @__PURE__ */ new Date();
-    let days = 1;
-    if (range === "7d") days = 7;
-    if (range === "30d") days = 30;
-    const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1e3);
-    return { from, to };
-  }
   async function loadHistoryForRange(range) {
-    const { from, to } = computeRange(range);
-    const url = "/api/history?from=" + encodeURIComponent(from.toISOString()) + "&to=" + encodeURIComponent(to.toISOString());
-    const rows = await fetchJSON(url);
-    rows.sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-    return rows;
+    const url = "/api/history?range=" + encodeURIComponent(range);
+    return await fetchJSON(url);
+  }
+  async function loadChartData(range, metric) {
+    const url = "/api/chart-data?range=" + encodeURIComponent(range) + "&metric=" + encodeURIComponent(metric);
+    return await fetchJSON(url);
   }
   function renderLineChart(containerId, rows, key) {
     const container = $(containerId);
@@ -223,46 +224,16 @@
     }
     container.appendChild(svg);
   }
-  function calculatePercentiles(values) {
-    const sorted = [...values].sort((a, b) => a - b);
-    const len = sorted.length;
-    const percentile = (p) => {
-      if (len === 0) return 0;
-      const index = (len - 1) * p;
-      const lower = Math.floor(index);
-      const upper = Math.ceil(index);
-      const weight = index % 1;
-      return sorted[lower] * (1 - weight) + sorted[upper] * weight;
-    };
-    return {
-      min: sorted[0] ?? 0,
-      p10: percentile(0.1),
-      q1: percentile(0.25),
-      median: percentile(0.5),
-      q3: percentile(0.75),
-      p90: percentile(0.9),
-      max: sorted[len - 1] ?? 0
-    };
-  }
-  function renderPercentileChart(containerId, rows, key) {
+  async function renderPercentileChart(containerId, range, metric) {
     const container = $(containerId);
     container.innerHTML = "";
-    if (!rows.length) {
+    const chartData = await loadChartData(range, metric);
+    const rows = chartData.data;
+    if (!rows.length || !chartData.stats) {
       container.textContent = "No data for selected range.";
       return;
     }
-    const values = rows.map((r) => {
-      const val = r[key];
-      if (key === "jitter_ms") {
-        return val ?? 0;
-      }
-      return val;
-    }).filter((v) => Number.isFinite(v));
-    if (values.length === 0) {
-      container.textContent = "No valid data.";
-      return;
-    }
-    const stats = calculatePercentiles(values);
+    const stats = chartData.stats;
     const svgNS = "http://www.w3.org/2000/svg";
     const width = 300;
     const height = 50;
@@ -372,10 +343,10 @@
     const select = $("range-download");
     const toggle = $("chart-type-download");
     const value = select.value || "24h";
-    const rows = await loadHistoryForRange(value);
     if (toggle?.classList.contains("active")) {
-      renderPercentileChart("download-chart", rows, "download_mbps");
+      await renderPercentileChart("download-chart", value, "download");
     } else {
+      const rows = await loadHistoryForRange(value);
       renderLineChart("download-chart", rows, "download_mbps");
     }
   }
@@ -383,10 +354,10 @@
     const select = $("range-upload");
     const toggle = $("chart-type-upload");
     const value = select.value || "24h";
-    const rows = await loadHistoryForRange(value);
     if (toggle?.classList.contains("active")) {
-      renderPercentileChart("upload-chart", rows, "upload_mbps");
+      await renderPercentileChart("upload-chart", value, "upload");
     } else {
+      const rows = await loadHistoryForRange(value);
       renderLineChart("upload-chart", rows, "upload_mbps");
     }
   }
@@ -394,10 +365,10 @@
     const select = $("range-latency");
     const toggle = $("chart-type-latency");
     const value = select.value || "24h";
-    const rows = await loadHistoryForRange(value);
     if (toggle?.classList.contains("active")) {
-      renderPercentileChart("latency-chart", rows, "ping_ms");
+      await renderPercentileChart("latency-chart", value, "ping");
     } else {
+      const rows = await loadHistoryForRange(value);
       renderLineChart("latency-chart", rows, "ping_ms");
     }
   }
@@ -405,10 +376,10 @@
     const select = $("range-jitter");
     const toggle = $("chart-type-jitter");
     const value = select.value || "24h";
-    const rows = await loadHistoryForRange(value);
     if (toggle?.classList.contains("active")) {
-      renderPercentileChart("jitter-chart", rows, "jitter_ms");
+      await renderPercentileChart("jitter-chart", value, "jitter");
     } else {
+      const rows = await loadHistoryForRange(value);
       renderLineChart("jitter-chart", rows, "jitter_ms");
     }
   }
@@ -417,9 +388,7 @@
     const scheds = await fetchJSON("/api/schedules");
     const list = $("schedules-list");
     list.innerHTML = "";
-    if (scheduleTimerInterval) {
-      updateScheduleTimer();
-    }
+    updateScheduleTimer();
     if (!scheds.length) {
       list.textContent = "No schedules configured yet.";
       return;
@@ -555,7 +524,9 @@
           loadSummary(),
           loadHistoryTable(),
           updateDownloadChart(),
-          updateUploadChart()
+          updateUploadChart(),
+          updateLatencyChart(),
+          updateJitterChart()
         ]);
       } catch (err) {
         console.error("run-now failed", err);
@@ -854,6 +825,8 @@
   var scheduleTimerInterval = null;
   var nextRunTime = null;
   var intervalDuration = null;
+  var lastResultTimestamp = null;
+  var resultPollInterval = null;
   async function updateScheduleTimer() {
     try {
       const data = await fetchJSON("/api/next-run");
@@ -915,6 +888,14 @@
       }
     }, 1e3);
   }
+  function startResultPolling() {
+    if (resultPollInterval) {
+      clearInterval(resultPollInterval);
+    }
+    resultPollInterval = window.setInterval(() => {
+      loadSummary().catch((err) => console.error("poll summary failed", err));
+    }, 1e4);
+  }
   async function init() {
     setupNav();
     setupRunNow();
@@ -922,6 +903,7 @@
     setupRangeSelectors();
     setupThemeSelection();
     startScheduleTimer();
+    startResultPolling();
     await Promise.all([
       loadSummary(),
       loadHistoryTable(),

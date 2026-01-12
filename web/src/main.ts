@@ -130,13 +130,7 @@ async function loadSummary(): Promise<void> {
 /* ---------- HISTORY TABLE ---------- */
 
 async function loadHistoryTable(): Promise<void> {
-  const now = new Date();
-  const from = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const url =
-    "/api/history?from=" +
-    encodeURIComponent(from.toISOString()) +
-    "&to=" +
-    encodeURIComponent(now.toISOString());
+  const url = "/api/history?range=24h";
 
   const rows = await fetchJSON<SpeedtestResult[]>(url);
 
@@ -173,29 +167,37 @@ async function loadHistoryTable(): Promise<void> {
 
 type RangeKey = "24h" | "7d" | "30d";
 
-function computeRange(range: RangeKey): { from: Date; to: Date } {
-  const to = new Date();
-  let days = 1;
-  if (range === "7d") days = 7;
-  if (range === "30d") days = 30;
-  const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
-  return { from, to };
-}
 
 async function loadHistoryForRange(range: RangeKey): Promise<SpeedtestResult[]> {
-  const { from, to } = computeRange(range);
-  const url =
-    "/api/history?from=" +
-    encodeURIComponent(from.toISOString()) +
-    "&to=" +
-    encodeURIComponent(to.toISOString());
+  const url = "/api/history?range=" + encodeURIComponent(range);
+  return await fetchJSON<SpeedtestResult[]>(url);
+}
 
-  const rows = await fetchJSON<SpeedtestResult[]>(url);
-  rows.sort(
-    (a, b) =>
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-  );
-  return rows;
+type ChartDataResponse = {
+  data: SpeedtestResult[];
+  stats?: {
+    min: number;
+    p10: number;
+    q1: number;
+    median: number;
+    q3: number;
+    p90: number;
+    max: number;
+  };
+  min_value: number;
+  max_value: number;
+};
+
+async function loadChartData(
+  range: RangeKey,
+  metric: "download" | "upload" | "ping" | "jitter"
+): Promise<ChartDataResponse> {
+  const url =
+    "/api/chart-data?range=" +
+    encodeURIComponent(range) +
+    "&metric=" +
+    encodeURIComponent(metric);
+  return await fetchJSON<ChartDataResponse>(url);
 }
 
 function renderLineChart(
@@ -346,65 +348,24 @@ function renderLineChart(
   container.appendChild(svg);
 }
 
-function calculatePercentiles(values: number[]): {
-  min: number;
-  q1: number;
-  median: number;
-  q3: number;
-  max: number;
-  p10: number;
-  p90: number;
-} {
-  const sorted = [...values].sort((a, b) => a - b);
-  const len = sorted.length;
 
-  const percentile = (p: number): number => {
-    if (len === 0) return 0;
-    const index = (len - 1) * p;
-    const lower = Math.floor(index);
-    const upper = Math.ceil(index);
-    const weight = index % 1;
-    return sorted[lower] * (1 - weight) + sorted[upper] * weight;
-  };
-
-  return {
-    min: sorted[0] ?? 0,
-    p10: percentile(0.1),
-    q1: percentile(0.25),
-    median: percentile(0.5),
-    q3: percentile(0.75),
-    p90: percentile(0.9),
-    max: sorted[len - 1] ?? 0,
-  };
-}
-
-function renderPercentileChart(
+async function renderPercentileChart(
   containerId: string,
-  rows: SpeedtestResult[],
-  key: "download_mbps" | "upload_mbps" | "ping_ms" | "jitter_ms",
-): void {
+  range: RangeKey,
+  metric: "download" | "upload" | "ping" | "jitter",
+): Promise<void> {
   const container = $(containerId);
   container.innerHTML = "";
 
-  if (!rows.length) {
+  const chartData = await loadChartData(range, metric);
+  const rows = chartData.data;
+
+  if (!rows.length || !chartData.stats) {
     container.textContent = "No data for selected range.";
     return;
   }
 
-  const values = rows.map((r) => {
-    const val = (r as any)[key] as number;
-    if (key === "jitter_ms") {
-      return val ?? 0;
-    }
-    return val;
-  }).filter(v => Number.isFinite(v));
-
-  if (values.length === 0) {
-    container.textContent = "No valid data.";
-    return;
-  }
-
-  const stats = calculatePercentiles(values);
+  const stats = chartData.stats;
   const svgNS = "http://www.w3.org/2000/svg";
   const width = 300;
   const height = 50;
@@ -538,10 +499,10 @@ async function updateDownloadChart(): Promise<void> {
   const select = $("range-download") as HTMLSelectElement;
   const toggle = $("chart-type-download") as HTMLButtonElement;
   const value = (select.value || "24h") as RangeKey;
-  const rows = await loadHistoryForRange(value);
   if (toggle?.classList.contains("active")) {
-    renderPercentileChart("download-chart", rows, "download_mbps");
+    await renderPercentileChart("download-chart", value, "download");
   } else {
+    const rows = await loadHistoryForRange(value);
     renderLineChart("download-chart", rows, "download_mbps");
   }
 }
@@ -550,10 +511,10 @@ async function updateUploadChart(): Promise<void> {
   const select = $("range-upload") as HTMLSelectElement;
   const toggle = $("chart-type-upload") as HTMLButtonElement;
   const value = (select.value || "24h") as RangeKey;
-  const rows = await loadHistoryForRange(value);
   if (toggle?.classList.contains("active")) {
-    renderPercentileChart("upload-chart", rows, "upload_mbps");
+    await renderPercentileChart("upload-chart", value, "upload");
   } else {
+    const rows = await loadHistoryForRange(value);
     renderLineChart("upload-chart", rows, "upload_mbps");
   }
 }
@@ -562,10 +523,10 @@ async function updateLatencyChart(): Promise<void> {
   const select = $("range-latency") as HTMLSelectElement;
   const toggle = $("chart-type-latency") as HTMLButtonElement;
   const value = (select.value || "24h") as RangeKey;
-  const rows = await loadHistoryForRange(value);
   if (toggle?.classList.contains("active")) {
-    renderPercentileChart("latency-chart", rows, "ping_ms");
+    await renderPercentileChart("latency-chart", value, "ping");
   } else {
+    const rows = await loadHistoryForRange(value);
     renderLineChart("latency-chart", rows, "ping_ms");
   }
 }
@@ -574,10 +535,10 @@ async function updateJitterChart(): Promise<void> {
   const select = $("range-jitter") as HTMLSelectElement;
   const toggle = $("chart-type-jitter") as HTMLButtonElement;
   const value = (select.value || "24h") as RangeKey;
-  const rows = await loadHistoryForRange(value);
   if (toggle?.classList.contains("active")) {
-    renderPercentileChart("jitter-chart", rows, "jitter_ms");
+    await renderPercentileChart("jitter-chart", value, "jitter");
   } else {
+    const rows = await loadHistoryForRange(value);
     renderLineChart("jitter-chart", rows, "jitter_ms");
   }
 }
