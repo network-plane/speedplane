@@ -33,3 +33,6 @@ go.work.sum
 speedplane
 speedplane.config
 builds/
+
+results/
+schedules.json

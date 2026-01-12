@@ -461,8 +461,8 @@ body{
   margin-top:60px;
   min-height:calc(100vh - 60px);
   display:flex;
-  
-  gap:12px;
+  flex-direction:column;
+  gap:16px;
   transition:margin-left 0.3s ease;
 }
 .sidebar.collapsed ~ .main{
@@ -478,8 +478,8 @@ body{
   border-right:1px solid var(--border);
   padding:16px 12px;
   display:flex;
-  
-  gap:12px;
+  flex-direction:column;
+  gap:16px;
   overflow-y:auto;
   overflow-x:hidden;
   box-sizing:border-box;
@@ -584,7 +584,7 @@ body{
 }
 .sidebar-nav{
   display:flex;
-  
+  flex-direction:column;
   gap:4px;
 }
 .nav-item{
@@ -631,8 +631,8 @@ body{
 }
 .view{
   display:none;
-  
-  gap:12px;
+  flex-direction:column;
+  gap:16px;
 }
 .view-active{
   display:flex;
@@ -687,22 +687,17 @@ body{
 }
 .form{
   display:flex;
-  
+  flex-direction:column;
   gap:12px;
 }
 .form-row{
   display:flex;
   flex-direction:row;
-  display:flex;
-  
   gap:12px;
+}
 .form-row.form-row-inline{
-
-
-
   align-items:flex-end;
   flex-wrap:nowrap;
-}
 }
 .form-row label{
   font-size:12px;
@@ -726,9 +721,10 @@ body{
 }
 .form-row input[type="checkbox"]{
   width:auto;
+}
 .form-field{
   display:flex;
-  
+  flex-direction:column;
   gap:4px;
   flex:1;
   min-width:0;
@@ -756,7 +752,6 @@ body{
 }
 .form-field input[type="checkbox"]{
   width:auto;
-}
 }
 .chart{
   width:100%;
@@ -787,7 +782,7 @@ body{
 }
 #schedules-list{
   display:flex;
-  
+  flex-direction:column;
   gap:8px;
   margin-bottom:16px;
 }
@@ -802,7 +797,7 @@ body{
 }
 .schedule-info{
   display:flex;
-  
+  flex-direction:column;
   gap:2px;
 }
 .schedule-name{

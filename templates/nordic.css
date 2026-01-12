@@ -597,8 +597,8 @@ a{color:inherit}
   margin-top:60px;
   min-height:calc(100vh - 60px);
   display:flex;
-  
-  gap:12px;
+  flex-direction:column;
+  gap:16px;
   transition:margin-left 0.3s ease;
 }
 .sidebar.collapsed ~ .main{
@@ -614,8 +614,8 @@ a{color:inherit}
   border-right:1px solid var(--border);
   padding:16px 12px;
   display:flex;
-  
-  gap:12px;
+  flex-direction:column;
+  gap:16px;
   overflow-y:auto;
   overflow-x:hidden;
   box-sizing:border-box;
@@ -720,7 +720,7 @@ a{color:inherit}
 }
 .sidebar-nav{
   display:flex;
-  
+  flex-direction:column;
   gap:4px;
 }
 .nav-item{
@@ -767,8 +767,8 @@ a{color:inherit}
 }
 .view{
   display:none;
-  
-  gap:12px;
+  flex-direction:column;
+  gap:16px;
 }
 .view-active{
   display:flex;
@@ -823,22 +823,17 @@ a{color:inherit}
 }
 .form{
   display:flex;
-  
+  flex-direction:column;
   gap:12px;
 }
 .form-row{
   display:flex;
   flex-direction:row;
-  display:flex;
-  
   gap:12px;
+}
 .form-row.form-row-inline{
-
-
-
   align-items:flex-end;
   flex-wrap:nowrap;
-}
 }
 .form-row label{
   font-size:12px;
@@ -862,9 +857,10 @@ a{color:inherit}
 }
 .form-row input[type="checkbox"]{
   width:auto;
+}
 .form-field{
   display:flex;
-  
+  flex-direction:column;
   gap:4px;
   flex:1;
   min-width:0;
@@ -892,7 +888,6 @@ a{color:inherit}
 }
 .form-field input[type="checkbox"]{
   width:auto;
-}
 }
 .chart{
   width:100%;
@@ -923,7 +918,7 @@ a{color:inherit}
 }
 #schedules-list{
   display:flex;
-  
+  flex-direction:column;
   gap:8px;
   margin-bottom:16px;
 }
@@ -938,7 +933,7 @@ a{color:inherit}
 }
 .schedule-info{
   display:flex;
-  
+  flex-direction:column;
   gap:2px;
 }
 .schedule-name{
