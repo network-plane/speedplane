@@ -13,19 +13,23 @@ import (
 	"speedplane/model"
 )
 
+// Store provides persistent storage for speedtest results.
 type Store struct {
 	baseDir string
 	mu      sync.Mutex
 }
 
+// New creates a new Store instance with the given base directory.
 func New(baseDir string) *Store {
 	return &Store{baseDir: baseDir}
 }
 
+// EnsureDirs creates the necessary directory structure for storing results.
 func (s *Store) EnsureDirs() error {
 	return os.MkdirAll(filepath.Join(s.baseDir, "results"), 0o755)
 }
 
+// SaveResult saves a speedtest result to disk, organizing files by date.
 func (s *Store) SaveResult(res *model.SpeedtestResult) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -59,6 +63,8 @@ func (s *Store) SaveResult(res *model.SpeedtestResult) error {
 	return enc.Encode(res)
 }
 
+// ListResults retrieves all speedtest results within the specified time range.
+// Results are sorted by timestamp in ascending order.
 func (s *Store) ListResults(from, to time.Time) ([]model.SpeedtestResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

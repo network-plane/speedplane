@@ -5,6 +5,7 @@ import (
     "time"
 )
 
+// SpeedtestResult represents the results of a speed test execution.
 type SpeedtestResult struct {
     ID            string          `json:"id"`
     Timestamp     time.Time       `json:"timestamp"`
@@ -23,13 +24,17 @@ type SpeedtestResult struct {
     RawJSON json.RawMessage `json:"raw_json,omitempty"`
 }
 
+// ScheduleType represents the type of schedule for speed tests.
 type ScheduleType string
 
 const (
+    // ScheduleInterval represents an interval-based schedule (e.g., every hour).
     ScheduleInterval ScheduleType = "interval"
-    ScheduleDaily    ScheduleType = "daily"
+    // ScheduleDaily represents a daily schedule at a specific time.
+    ScheduleDaily ScheduleType = "daily"
 )
 
+// Schedule defines a scheduled speed test with its configuration.
 type Schedule struct {
     ID        string       `json:"id"`
     Name      string       `json:"name"`

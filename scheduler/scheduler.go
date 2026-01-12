@@ -11,18 +11,23 @@ import (
 	"speedplane/model"
 )
 
+// Runner is a function that executes a speedtest and returns the result.
 type Runner func(ctx context.Context) (*model.SpeedtestResult, error)
-type OnComplete func(result *model.SpeedtestResult) // Called when a speedtest completes
 
+// OnComplete is a callback function called when a speedtest completes.
+type OnComplete func(result *model.SpeedtestResult)
+
+// Scheduler manages scheduled speedtest executions.
 type Scheduler struct {
 	mu        sync.Mutex
 	schedules []model.Schedule
 	lastRun   map[string]time.Time
 	runner    Runner
 	onUpdate  func() // Called when lastRun changes
-	onComplete OnComplete // Called when a speedtest completes
+	onComplete OnComplete
 }
 
+// New creates a new Scheduler with the given runner, schedules, and last run times.
 func New(runner Runner, initial []model.Schedule, lastRun map[string]time.Time) *Scheduler {
 	if lastRun == nil {
 		lastRun = make(map[string]time.Time)
@@ -37,18 +42,22 @@ func New(runner Runner, initial []model.Schedule, lastRun map[string]time.Time) 
 	return s
 }
 
+// SetOnUpdate sets a callback function that is called when the scheduler's state changes.
 func (s *Scheduler) SetOnUpdate(fn func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onUpdate = fn
 }
 
+// SetOnComplete sets a callback function that is called when a scheduled speedtest completes.
 func (s *Scheduler) SetOnComplete(fn OnComplete) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onComplete = fn
 }
 
+// Start begins the scheduler, checking for scheduled speedtests every 30 seconds.
+// It runs until the context is cancelled.
 func (s *Scheduler) Start(ctx context.Context) {
 	go func() {
 		log.Println("[scheduler] started")
@@ -167,6 +176,7 @@ func (s *Scheduler) Schedules() []model.Schedule {
 	return out
 }
 
+// SetSchedules updates the scheduler's list of schedules.
 func (s *Scheduler) SetSchedules(scheds []model.Schedule) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -176,6 +186,7 @@ func (s *Scheduler) SetSchedules(scheds []model.Schedule) {
 	// Don't reset lastRun - preserve it
 }
 
+// LastRun returns a copy of the map tracking when each schedule last ran.
 func (s *Scheduler) LastRun() map[string]time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -20,7 +20,10 @@ import (
 	"speedplane/storage"
 )
 
+// RunFunc is a function that executes a speedtest without progress updates.
 type RunFunc func(ctx context.Context) (*model.SpeedtestResult, error)
+
+// RunWithProgressFunc is a function that executes a speedtest with progress callbacks.
 type RunWithProgressFunc func(ctx context.Context, progress func(stage string, message string)) (*model.SpeedtestResult, error)
 
 type progressUpdate struct {
@@ -64,6 +67,7 @@ func (pt *progressTracker) removeSession(id string) {
 	}
 }
 
+// Server provides HTTP API endpoints for the speedplane application.
 type Server struct {
 	store        *storage.Store
 	runSpeedtest RunFunc
@@ -74,6 +78,7 @@ type Server struct {
 	wsManager    *WSConnectionManager
 }
 
+// NewServer creates a new API server with the given dependencies.
 func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithProgressFunc, sched *scheduler.Scheduler, saveConfig func()) *Server {
 	return &Server{
 		store:          store,
@@ -86,6 +91,7 @@ func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithPro
 	}
 }
 
+// Register registers all API routes with the given HTTP mux.
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/summary", s.handleSummary)

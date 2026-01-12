@@ -1,15 +1,16 @@
 package config
 
 import (
-    "encoding/json"
-    "errors"
-    "os"
-    "path/filepath"
-    "time"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"time"
 
-    "speedplane/model"
+	"speedplane/model"
 )
 
+// Config is the configuration for the Speedplane server
 type Config struct {
     DataDir         string                    `json:"data_dir"`
     ListenAddr      string                    `json:"listen_addr"`
@@ -18,6 +19,7 @@ type Config struct {
     LastRun         map[string]time.Time      `json:"last_run,omitempty"`
 }
 
+// Default returns a Config with default values.
 func Default() Config {
     return Config{
         DataDir:         ".",
@@ -28,6 +30,8 @@ func Default() Config {
     }
 }
 
+// Load reads and parses the configuration from the data directory.
+// If the config file doesn't exist, it returns a default configuration.
 func Load(dataDir string) (Config, error) {
     cfgPath := filepath.Join(dataDir, "speedplane.config")
 
@@ -59,6 +63,8 @@ func Load(dataDir string) (Config, error) {
     return cfg, nil
 }
 
+// Save writes the configuration to disk in the data directory.
+// The file is written atomically using a temporary file.
 func Save(cfg Config) error {
     cfgPath := filepath.Join(cfg.DataDir, "speedplane.config")
 
