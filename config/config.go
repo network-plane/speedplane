@@ -13,6 +13,7 @@ import (
 // Config is the configuration for the Speedplane server
 type Config struct {
     DataDir         string                    `json:"data_dir"`
+    DBPath          string                    `json:"db_path"`
     ListenAddr      string                    `json:"listen_addr"`
     PublicDashboard bool                      `json:"public_dashboard"`
     Schedules       []model.Schedule          `json:"schedules,omitempty"`
@@ -23,6 +24,7 @@ type Config struct {
 func Default() Config {
     return Config{
         DataDir:         ".",
+        DBPath:          "", // Empty means use {data_dir}/speedplane.results
         ListenAddr:       ":8080",
         PublicDashboard: false,
         Schedules:       nil,

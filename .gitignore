@@ -34,6 +34,9 @@ speedplane
 speedplane.config
 builds/
 
+speedplane.db
+speedplane.results
+*.results
 results/
 schedules.json
 homepage/

@@ -223,8 +223,64 @@ async function loadHistoryTable(): Promise<void> {
       <td style="font-family: monospace; font-size: 12px;">${r.external_ip || "–"}</td>
       <td>${r.isp || "–"}</td>
       <td>${serverInfo}</td>
+      <td>
+        <button class="btn delete-result-btn" data-result-id="${r.id}" style="padding: 4px 8px; font-size: 12px; background-color: #dc3545; color: white; border: none;">Delete</button>
+      </td>
     `;
     tbody.appendChild(tr);
+  }
+
+  // Attach delete event listeners
+  const deleteButtons = tbody.querySelectorAll(".delete-result-btn");
+  deleteButtons.forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const button = e.target as HTMLButtonElement;
+      const id = button.getAttribute("data-result-id");
+      if (id) {
+        await deleteResult(id);
+      }
+    });
+  });
+}
+
+async function deleteResult(id: string): Promise<void> {
+  if (!confirm("Are you sure you want to delete this result?")) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/results/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        alert("Result not found");
+      } else {
+        alert("Failed to delete result");
+      }
+      return;
+    }
+
+    // Reload the history table and refresh charts
+    const isCombinedGraph = localStorage.getItem("combined-graph") === "true";
+    const chartPromises = isCombinedGraph
+      ? [updateCombinedChart()]
+      : [
+          updateDownloadChart(),
+          updateUploadChart(),
+          updateLatencyChart(),
+          updateJitterChart(),
+        ];
+
+    await Promise.all([
+      loadSummary(),
+      loadHistoryTable(),
+      ...chartPromises,
+    ]);
+  } catch (err) {
+    console.error("Delete result error:", err);
+    alert("Failed to delete result");
   }
 }
 
@@ -411,7 +467,7 @@ function renderLineChart(
   if (Number.isFinite(avgValue) && avgValue >= minY && avgValue <= maxY) {
     const avgYNorm = (avgValue - minY) / (maxY - minY);
     const avgY = paddingY + innerH - avgYNorm * innerH;
-    
+
     const avgLine = document.createElementNS(svgNS, "line");
     avgLine.setAttribute("x1", paddingX.toString());
     avgLine.setAttribute("x2", (width - paddingX).toString());
@@ -422,31 +478,31 @@ function renderLineChart(
     avgLine.setAttribute("stroke-dasharray", "2,2");
     avgLine.setAttribute("opacity", "0.8");
     avgLine.style.cursor = "pointer";
-    
+
     // Add hover event for average line tooltip
     avgLine.addEventListener("mouseenter", (e) => {
       const svgRect = svg.getBoundingClientRect();
       const scaleY = svgRect.height / height;
       const mouseX = (e as MouseEvent).clientX;
       const y = svgRect.top + avgY * scaleY;
-      
+
       tooltip.innerHTML = `
         <div style="font-weight: 600; margin-bottom: 2px;">Average ${metricInfo.name}</div>
         <div>${formatNumber(avgValue, 2)} ${metricInfo.unit}</div>
         <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">Based on ${rows.length} measurement${rows.length !== 1 ? "s" : ""}</div>
       `;
       tooltip.style.display = "block";
-      
+
       // Position tooltip above the cursor, centered horizontally
       const tooltipRect = tooltip.getBoundingClientRect();
       tooltip.style.left = `${mouseX - tooltipRect.width / 2}px`;
       tooltip.style.top = `${y - tooltipRect.height - 8}px`;
     });
-    
+
     avgLine.addEventListener("mouseleave", () => {
       tooltip.style.display = "none";
     });
-    
+
     svg.appendChild(avgLine);
   }
 
@@ -472,40 +528,40 @@ function renderLineChart(
     circle.setAttribute("r", "1.2");
     circle.setAttribute("fill", "#ffb341");
     circle.style.cursor = "pointer";
-    
+
     // Add hover events for tooltip
     const row = rows[index];
     const value = values[index];
     const date = new Date(row.timestamp);
-    
+
     circle.addEventListener("mouseenter", (e) => {
       const svgRect = svg.getBoundingClientRect();
       const scaleX = svgRect.width / width;
       const scaleY = svgRect.height / height;
-      
+
       // Highlight the circle
       circle.setAttribute("r", "1.4");
       circle.setAttribute("fill", "#ffb341");
       circle.setAttribute("stroke", "#ffd700");
       circle.setAttribute("stroke-width", "0.5");
-      
+
       tooltip.innerHTML = `
         <div style="font-weight: 600; margin-bottom: 2px;">${metricInfo.name}</div>
         <div>${formatNumber(value, 2)} ${metricInfo.unit}</div>
         <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">${formatDateTime(date)}</div>
       `;
       tooltip.style.display = "block";
-      
+
       const x = svgRect.left + coord.x * scaleX;
       const y = svgRect.top + coord.y * scaleY;
-      
+
       // Position tooltip above the point, centered horizontally
       // Get dimensions after display
       const tooltipRect = tooltip.getBoundingClientRect();
       tooltip.style.left = `${x - tooltipRect.width / 2}px`;
       tooltip.style.top = `${y - tooltipRect.height - 8}px`;
     });
-    
+
     circle.addEventListener("mouseleave", () => {
       // Restore original circle size
       circle.setAttribute("r", "1.2");
@@ -514,7 +570,7 @@ function renderLineChart(
       circle.removeAttribute("stroke-width");
       tooltip.style.display = "none";
     });
-    
+
     svg.appendChild(circle);
   });
 
@@ -653,7 +709,7 @@ async function renderPercentileChart(
   upperWhisker.setAttribute("stroke", "rgba(255,255,255,0.4)");
   upperWhisker.setAttribute("stroke-width", "0.4");
   svg.appendChild(upperWhisker);
-  
+
   // Upper whisker cap (horizontal line at max)
   const upperCap = document.createElementNS(svgNS, "line");
   upperCap.setAttribute("x1", (centerX - whiskerCapWidth / 2).toString());
@@ -674,7 +730,7 @@ async function renderPercentileChart(
   lowerWhisker.setAttribute("stroke", "rgba(255,255,255,0.4)");
   lowerWhisker.setAttribute("stroke-width", "0.4");
   svg.appendChild(lowerWhisker);
-  
+
   // Lower whisker cap (horizontal line at min)
   const lowerCap = document.createElementNS(svgNS, "line");
   lowerCap.setAttribute("x1", (centerX - whiskerCapWidth / 2).toString());
@@ -806,7 +862,7 @@ function renderCombinedChart(
     const min = Math.min(...vals);
     const max = Math.max(...vals);
     const range = max - min || 1; // Avoid division by zero
-    
+
     if (useLogarithmic) {
       // Use a small epsilon to avoid log(0) or log(negative)
       const safeMin = Math.max(min, 0.001);
@@ -815,7 +871,7 @@ function renderCombinedChart(
       const logRange = logMax - logMin || 1;
       return { min: safeMin, max, logMin, logMax, logRange, range };
     }
-    
+
     return { min, max, range };
   });
 
@@ -884,7 +940,7 @@ function renderCombinedChart(
       // Calculate log position (inverted: top is max, bottom is min)
       const logPos = overallLogMax - (i / gridLines) * overallLogRange;
       const value = Math.pow(10, logPos);
-      
+
       // Format value appropriately
       let label: string;
       if (value >= 1000) {
@@ -894,7 +950,7 @@ function renderCombinedChart(
       } else {
         label = value.toFixed(3);
       }
-      
+
       const text = document.createElementNS(svgNS, "text");
       text.setAttribute("x", (paddingLeft - 4).toString());
       text.setAttribute("y", (y + 1.5).toString());
@@ -940,7 +996,7 @@ function renderCombinedChart(
   // Calculate overall range for positioning (used in both modes)
   let overallMin: number, overallMax: number, overallRange: number;
   let overallLogMin: number, overallLogMax: number, overallLogRange: number;
-  
+
   if (useLogarithmic) {
     overallMin = Math.min(...metricRanges.map((r) => r.min));
     overallMax = Math.max(...metricRanges.map((r) => r.max));
@@ -958,11 +1014,11 @@ function renderCombinedChart(
   metrics.forEach((metric, metricIdx) => {
     const range = metricRanges[metricIdx];
     const coords: { x: number; y: number }[] = [];
-    
+
     for (let i = 0; i < times.length; i++) {
       const xNorm = (times[i] - minX) / (maxX - minX);
       const x = paddingLeft + xNorm * innerW;
-      
+
       let yNorm: number;
       if (useLogarithmic) {
         // Use logarithmic normalization
@@ -975,7 +1031,7 @@ function renderCombinedChart(
         // Use linear normalization (percentage) - each metric normalized separately
         yNorm = range.range > 0 ? (metric.values[i] - range.min) / range.range : 0.5;
       }
-      
+
       const y = paddingY + innerH - yNorm * innerH;
       coords.push({ x, y });
     }
@@ -998,9 +1054,9 @@ function renderCombinedChart(
         avgYNorm = range.range > 0 ? (avgValue - range.min) / range.range : 0.5;
         if (avgYNorm < 0 || avgYNorm > 1) return; // Skip if outside range
       }
-      
+
       const avgY = paddingY + innerH - avgYNorm * innerH;
-      
+
       const avgLine = document.createElementNS(svgNS, "line");
       avgLine.setAttribute("x1", paddingLeft.toString());
       avgLine.setAttribute("x2", (width - paddingRight).toString());
@@ -1011,14 +1067,14 @@ function renderCombinedChart(
       avgLine.setAttribute("stroke-dasharray", "2,2");
       avgLine.setAttribute("opacity", "0.6");
       avgLine.style.cursor = "pointer";
-      
+
       // Add hover event for average line tooltip
       avgLine.addEventListener("mouseenter", (e) => {
         const svgRect = svg.getBoundingClientRect();
         const scaleY = svgRect.height / height;
         const mouseX = (e as MouseEvent).clientX;
         const y = svgRect.top + avgY * scaleY;
-        
+
         tooltip.innerHTML = `
           <div style="font-weight: 600; margin-bottom: 2px;">Average ${metric.name}</div>
           <div>${formatNumber(avgValue, 2)} ${metric.unit}</div>
@@ -1029,11 +1085,11 @@ function renderCombinedChart(
         tooltip.style.left = `${mouseX - tooltipRect.width / 2}px`;
         tooltip.style.top = `${y - tooltipRect.height - 5}px`;
       });
-      
+
       avgLine.addEventListener("mouseleave", () => {
         tooltip.style.display = "none";
       });
-      
+
       svg.appendChild(avgLine);
     }
 
@@ -1104,7 +1160,7 @@ function renderCombinedChart(
   let legendX = paddingLeft;
   metrics.forEach((metric) => {
     const legendGroup = document.createElementNS(svgNS, "g");
-    
+
     const circle = document.createElementNS(svgNS, "circle");
     circle.setAttribute("cx", legendX.toString());
     circle.setAttribute("cy", legendY.toString());
@@ -1539,7 +1595,7 @@ function setupRangeSelectors(): void {
   const savedRangeUpload = localStorage.getItem("chart-range-upload");
   const savedRangeLatency = localStorage.getItem("chart-range-latency");
   const savedRangeJitter = localStorage.getItem("chart-range-jitter");
-  
+
   const savedPercentileDownload = localStorage.getItem("chart-percentile-download") === "true";
   const savedPercentileUpload = localStorage.getItem("chart-percentile-upload") === "true";
   const savedPercentileLatency = localStorage.getItem("chart-percentile-latency") === "true";
@@ -1720,7 +1776,7 @@ function setupCombinedGraphPreference(): void {
   const savedLog = localStorage.getItem("logarithmic-scale");
   const isCombinedEnabled = savedCombined === "true";
   const isLogEnabled = savedLog === "true";
-  
+
   checkbox.checked = isCombinedEnabled;
   logCheckbox.checked = isLogEnabled;
   updateChartVisibility(isCombinedEnabled);

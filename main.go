@@ -34,10 +34,11 @@ var staticFS embed.FS
 
 var (
 	dataDir    string
+	dbPath     string
 	listen     string
 	listenPort int
 	public     bool
-	appVersion = "0.1.16"
+	appVersion = "0.1.22"
 )
 
 var rootCmd = &cobra.Command{
@@ -64,6 +65,7 @@ func init() {
 	wd, _ := os.Getwd()
 	rootCmd.Version = appVersion
 	rootCmd.Flags().StringVar(&dataDir, "data-dir", wd, "Data directory (default: current directory)")
+	rootCmd.Flags().StringVar(&dbPath, "db", "", "Database path (full path with filename, or directory to use default filename 'speedplane.results')")
 	rootCmd.Flags().StringVar(&listen, "listen", "all", "IP address to listen on (default: all)")
 	rootCmd.Flags().IntVar(&listenPort, "listen-port", 8080, "Port to listen on (default: 8080)")
 	rootCmd.Flags().BoolVar(&public, "public", false, "Enable public dashboard access")
@@ -88,7 +90,7 @@ func run(cmd *cobra.Command, args []string) {
 		dataDir = cfg.DataDir
 		cfg.DataDir = dataDir
 	}
-	
+
 	if cmd.Flags().Changed("listen") || cmd.Flags().Changed("listen-port") {
 		if listen != "" && listen != "all" {
 			cfg.ListenAddr = fmt.Sprintf("%s:%d", listen, listenPort)
@@ -100,6 +102,9 @@ func run(cmd *cobra.Command, args []string) {
 	if cmd.Flags().Changed("public") {
 		cfg.PublicDashboard = public
 	}
+	if cmd.Flags().Changed("db") {
+		cfg.DBPath = dbPath
+	}
 
 	// Ensure data directory exists and is absolute
 	dataDirAbs, err := filepath.Abs(cfg.DataDir)
@@ -108,10 +113,11 @@ func run(cmd *cobra.Command, args []string) {
 	}
 	cfg.DataDir = dataDirAbs
 
-	store := storage.New(cfg.DataDir)
-	if err := store.EnsureDirs(); err != nil {
-		log.Fatalf("ensure data dir: %v", err)
+	store, err := storage.New(cfg.DBPath, cfg.DataDir)
+	if err != nil {
+		log.Fatalf("initialize storage: %v", err)
 	}
+	defer store.Close()
 
 	// Load schedules and lastRun from config
 	if cfg.Schedules == nil {
@@ -296,6 +302,7 @@ func runConfigGenerate(cmd *cobra.Command, args []string) {
 	// Create default config
 	cfg := config.Default()
 	cfg.DataDir = dataDirAbs
+	cfg.DBPath = filepath.Join(dataDirAbs, "speedplane.results")
 
 	// Check if config file already exists
 	cfgPath := filepath.Join(dataDirAbs, "speedplane.config")

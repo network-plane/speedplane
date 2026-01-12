@@ -96,6 +96,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/summary", s.handleSummary)
 	mux.HandleFunc("/api/history", s.handleHistory)
+	mux.HandleFunc("/api/results/", s.handleResultByID)
 	mux.HandleFunc("/api/chart-data", s.handleChartData)
 	mux.HandleFunc("/api/run", s.handleRun)
 	mux.HandleFunc("/api/run/stream", s.handleRunStream)
@@ -233,6 +234,33 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, results)
+}
+
+// handleResultByID handles operations on a specific result by ID.
+func (s *Server) handleResultByID(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/results/")
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.store.DeleteResult(id); err != nil {
+			if err.Error() == "result not found" {
+				http.NotFound(w, r)
+				return
+			}
+			http.Error(w, "failed to delete result", http.StatusInternalServerError)
+			log.Printf("delete result %s: %v", id, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		w.Header().Set("Allow", http.MethodDelete)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
 }
 
 // ---------- run-now ----------

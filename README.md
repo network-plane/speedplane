@@ -53,6 +53,7 @@ Create a `speedplane.config` file in your data directory:
 ```json
 {
   "data_dir": "/path/to/data",
+  "db_path": "/path/to/database.results",
   "listen_addr": ":8080",
   "public_dashboard": false
 }
@@ -61,6 +62,7 @@ Create a `speedplane.config` file in your data directory:
 ### Command-Line Flags
 
 - `--data-dir string` - Data directory (default: current directory)
+- `--db string` - Database path (full path with filename, or directory to use default filename 'speedplane.results')
 - `--listen string` - IP address to listen on (default: "all" - listens on all interfaces)
 - `--listen-port int` - Port to listen on (default: 8080)
 - `--public` - Enable public dashboard access (default: false)
@@ -136,15 +138,16 @@ Schedules can be created via the API or web interface. Two types are supported:
 
 ## Data Storage
 
-Speedtest results are stored in JSON format under the data directory:
+Speedtest results are stored in a SQLite database. By default, the database is stored as `speedplane.results` in the data directory. You can customize the database path using the `--db` flag or `db_path` config option:
+
+- If `db_path` is empty: uses `{data_dir}/speedplane.results`
+- If `db_path` is a directory: uses `{db_path}/speedplane.results`
+- If `db_path` is a full path with filename: uses it as-is
+
 ```
 data-dir/
-  results/
-    YYYY/
-      MM/
-        DD/
-          YYYY-MM-DDTHH-MM-SS.json
-  schedules.json
+  speedplane.results  # SQLite database containing all speedtest results (default)
+  speedplane.config
 ```
 
 ## Template Subsmissions

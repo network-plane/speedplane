@@ -1,66 +1,149 @@
 package storage
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"strings"
 	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"speedplane/model"
 )
 
-// Store provides persistent storage for speedtest results.
+// Store provides persistent storage for speedtest results using SQLite.
 type Store struct {
-	baseDir string
-	mu      sync.Mutex
+	db *sql.DB
+	mu sync.Mutex
 }
 
-// New creates a new Store instance with the given base directory.
-func New(baseDir string) *Store {
-	return &Store{baseDir: baseDir}
+// resolveDBPath determines the final database path based on the provided dbPath and dataDir.
+// If dbPath is empty, uses dataDir + "speedplane.results"
+// If dbPath is a directory, appends "speedplane.results"
+// If dbPath is a full path with filename, uses it as-is
+func resolveDBPath(dbPath, dataDir string) string {
+	if dbPath == "" {
+		return filepath.Join(dataDir, "speedplane.results")
+	}
+
+	// Check if dbPath is a directory (ends with separator or is an existing directory)
+	if strings.HasSuffix(dbPath, string(filepath.Separator)) || strings.HasSuffix(dbPath, "/") {
+		return filepath.Join(dbPath, "speedplane.results")
+	}
+
+	// Check if it's an existing directory
+	if info, err := os.Stat(dbPath); err == nil && info.IsDir() {
+		return filepath.Join(dbPath, "speedplane.results")
+	}
+
+	// Otherwise, treat it as a full path with filename
+	return dbPath
 }
 
-// EnsureDirs creates the necessary directory structure for storing results.
+// New creates a new Store instance with a SQLite database.
+// dbPath can be empty (uses dataDir + "speedplane.results"), a directory (appends "speedplane.results"),
+// or a full path with filename (uses as-is).
+func New(dbPath, dataDir string) (*Store, error) {
+	finalPath := resolveDBPath(dbPath, dataDir)
+
+	// Ensure the directory exists
+	dir := filepath.Dir(finalPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create db directory: %w", err)
+	}
+
+	db, err := sql.Open("sqlite", finalPath)
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+
+	store := &Store{db: db}
+
+	// Initialize the database schema
+	if err := store.initSchema(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("init schema: %w", err)
+	}
+
+	return store, nil
+}
+
+// initSchema creates the results table if it doesn't exist.
+func (s *Store) initSchema() error {
+	query := `
+	CREATE TABLE IF NOT EXISTS results (
+		id TEXT PRIMARY KEY,
+		timestamp TEXT NOT NULL,
+		download_mbps REAL NOT NULL,
+		upload_mbps REAL NOT NULL,
+		ping_ms REAL NOT NULL,
+		jitter_ms REAL,
+		packet_loss_pct REAL,
+		isp TEXT,
+		external_ip TEXT,
+		server_id TEXT,
+		server_name TEXT,
+		server_country TEXT,
+		raw_json TEXT,
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_results_timestamp ON results(timestamp);
+	`
+
+	_, err := s.db.Exec(query)
+	return err
+}
+
+// EnsureDirs is a no-op for SQLite storage (kept for compatibility).
 func (s *Store) EnsureDirs() error {
-	return os.MkdirAll(filepath.Join(s.baseDir, "results"), 0o755)
+	return nil
 }
 
-// SaveResult saves a speedtest result to disk, organizing files by date.
+// SaveResult saves a speedtest result to the database.
 func (s *Store) SaveResult(res *model.SpeedtestResult) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if res == nil {
 		return fmt.Errorf("nil result")
 	}
-	t := res.Timestamp.UTC()
-	dir := filepath.Join(
-		s.baseDir,
-		"results",
-		fmt.Sprintf("%04d", t.Year()),
-		fmt.Sprintf("%02d", t.Month()),
-		fmt.Sprintf("%02d", t.Day()),
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	timestamp := res.Timestamp.UTC().Format(time.RFC3339)
+	var rawJSON sql.NullString
+	if len(res.RawJSON) > 0 {
+		rawJSON = sql.NullString{String: string(res.RawJSON), Valid: true}
+	}
+
+	query := `
+	INSERT OR REPLACE INTO results (
+		id, timestamp, download_mbps, upload_mbps, ping_ms, jitter_ms,
+		packet_loss_pct, isp, external_ip, server_id, server_name,
+		server_country, raw_json
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := s.db.Exec(query,
+		res.ID,
+		timestamp,
+		res.DownloadMbps,
+		res.UploadMbps,
+		res.PingMs,
+		res.JitterMs,
+		res.PacketLossPct,
+		res.ISP,
+		res.ExternalIP,
+		res.ServerID,
+		res.ServerName,
+		res.ServerCountry,
+		rawJSON,
 	)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
 
-	filename := fmt.Sprintf("%s.json", t.Format("2006-01-02T15-04-05Z07-00"))
-	path := filepath.Join(dir, filename)
-
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	return enc.Encode(res)
+	return err
 }
 
 // ListResults retrieves all speedtest results within the specified time range.
@@ -69,55 +152,101 @@ func (s *Store) ListResults(from, to time.Time) ([]model.SpeedtestResult, error)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	from = from.UTC()
-	to = to.UTC()
+	fromUTC := from.UTC().Format(time.RFC3339)
+	toUTC := to.UTC().Format(time.RFC3339)
 
-	base := filepath.Join(s.baseDir, "results")
+	query := `
+	SELECT id, timestamp, download_mbps, upload_mbps, ping_ms, jitter_ms,
+	       packet_loss_pct, isp, external_ip, server_id, server_name,
+	       server_country, raw_json
+	FROM results
+	WHERE timestamp >= ? AND timestamp <= ?
+	ORDER BY timestamp ASC
+	`
+
+	rows, err := s.db.Query(query, fromUTC, toUTC)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
 	var results []model.SpeedtestResult
-
-	err := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if filepath.Ext(path) != ".json" {
-			return nil
-		}
-
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
+	for rows.Next() {
 		var r model.SpeedtestResult
-		if err := json.NewDecoder(f).Decode(&r); err != nil {
-			return err
-		}
-		if r.Timestamp.IsZero() {
-			return nil
+		var timestampStr string
+		var rawJSON sql.NullString
+
+		err := rows.Scan(
+			&r.ID,
+			&timestampStr,
+			&r.DownloadMbps,
+			&r.UploadMbps,
+			&r.PingMs,
+			&r.JitterMs,
+			&r.PacketLossPct,
+			&r.ISP,
+			&r.ExternalIP,
+			&r.ServerID,
+			&r.ServerName,
+			&r.ServerCountry,
+			&rawJSON,
+		)
+		if err != nil {
+			return nil, err
 		}
 
-		t := r.Timestamp.UTC()
-		if t.Before(from) || t.After(to) {
-			return nil
+		// Parse timestamp
+		t, err := time.Parse(time.RFC3339, timestampStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse timestamp: %w", err)
+		}
+		r.Timestamp = t.UTC()
+
+		// Handle raw JSON
+		if rawJSON.Valid {
+			r.RawJSON = json.RawMessage(rawJSON.String)
 		}
 
 		results = append(results, r)
-		return nil
-	})
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
+	}
+
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Timestamp.Before(results[j].Timestamp)
-	})
-
 	return results, nil
+}
+
+// DeleteResult deletes a speedtest result by ID.
+func (s *Store) DeleteResult(id string) error {
+	if id == "" {
+		return fmt.Errorf("empty id")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `DELETE FROM results WHERE id = ?`
+	result, err := s.db.Exec(query, id)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("result not found")
+	}
+
+	return nil
+}
+
+// Close closes the database connection.
+func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.db.Close()
 }
