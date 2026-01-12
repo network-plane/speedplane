@@ -1304,39 +1304,145 @@ async function loadSchedules(): Promise<void> {
 
 /* ---------- NAV ---------- */
 
+let sidebarManuallyToggled = false;
+let autoCollapseTimeout: number | null = null;
+const AUTO_COLLAPSE_DELAY = 3000; // 3 seconds after last interaction
+const HOVER_EXPAND_DELAY = 3000; // 3 seconds to expand on hover
+
 function setupNav(): void {
   // Sidebar toggle functionality
   const sidebar = document.getElementById("sidebar");
   const sidebarToggle = document.getElementById("sidebar-toggle");
   const isExpanded = localStorage.getItem("sidebar-expanded") === "true";
 
+  // Check if sidebar was manually toggled (stored in sessionStorage to persist across page loads)
+  sidebarManuallyToggled = sessionStorage.getItem("sidebar-manually-toggled") === "true";
+
   if (sidebar) {
-    if (isExpanded) {
+    if (isExpanded && sidebarManuallyToggled) {
       sidebar.classList.remove("collapsed");
     } else {
       sidebar.classList.add("collapsed");
+      // If not manually toggled, ensure it starts collapsed
+      if (!sidebarManuallyToggled) {
+        localStorage.setItem("sidebar-expanded", "false");
+      }
     }
 
     if (sidebarToggle) {
       sidebarToggle.addEventListener("click", () => {
+        sidebarManuallyToggled = true;
+        sessionStorage.setItem("sidebar-manually-toggled", "true");
         sidebar.classList.toggle("collapsed");
         const expanded = !sidebar.classList.contains("collapsed");
         localStorage.setItem("sidebar-expanded", String(expanded));
+        // Cancel auto-collapse when manually toggled
+        if (autoCollapseTimeout) {
+          clearTimeout(autoCollapseTimeout);
+          autoCollapseTimeout = null;
+        }
+        // If manually collapsed, reset the flag
+        if (!expanded) {
+          sidebarManuallyToggled = false;
+          sessionStorage.removeItem("sidebar-manually-toggled");
+        }
       });
     }
+
+    // Auto-collapse functionality - only if not manually toggled
+    if (!sidebarManuallyToggled) {
+      scheduleAutoCollapse();
+    }
+
+    // Auto-expand sidebar on hover after 3 seconds (when collapsed)
+    let sidebarHoverTimeout: number | null = null;
+
+    sidebar.addEventListener("mouseenter", () => {
+      // Cancel auto-collapse
+      if (autoCollapseTimeout) {
+        clearTimeout(autoCollapseTimeout);
+        autoCollapseTimeout = null;
+      }
+      // Auto-expand if collapsed
+      if (sidebar.classList.contains("collapsed")) {
+        sidebarHoverTimeout = window.setTimeout(() => {
+          if (sidebar && sidebar.classList.contains("collapsed")) {
+            sidebar.classList.remove("collapsed");
+            localStorage.setItem("sidebar-expanded", "true");
+            // Don't set sidebarManuallyToggled - this was expanded via hover, so it should auto-collapse
+          }
+          sidebarHoverTimeout = null;
+        }, HOVER_EXPAND_DELAY);
+      }
+    });
+
+    sidebar.addEventListener("mouseleave", () => {
+      // Cancel hover expand timeout
+      if (sidebarHoverTimeout) {
+        clearTimeout(sidebarHoverTimeout);
+        sidebarHoverTimeout = null;
+      }
+      // Schedule auto-collapse if expanded and not manually toggled
+      if (!sidebar.classList.contains("collapsed") && !sidebarManuallyToggled) {
+        scheduleAutoCollapse();
+      }
+    });
+
+    // Auto-collapse when clicking outside the sidebar
+    document.addEventListener("click", (e) => {
+      if (!sidebarManuallyToggled && sidebar && !sidebar.classList.contains("collapsed")) {
+        const target = e.target as HTMLElement;
+        // Don't collapse if clicking on sidebar or toggle button
+        if (!sidebar.contains(target) && target !== sidebarToggle && !sidebarToggle?.contains(target)) {
+          scheduleAutoCollapse();
+        }
+      }
+    });
   }
 
   const buttons = document.querySelectorAll<HTMLButtonElement>(".nav-item");
-  buttons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      // Expand sidebar when nav item is clicked (if collapsed)
-      if (sidebar && sidebar.classList.contains("collapsed")) {
-        sidebar.classList.remove("collapsed");
-        localStorage.setItem("sidebar-expanded", "true");
-      }
 
+  buttons.forEach((btn) => {
+    let hoverTimeout: number | null = null;
+
+    // Auto-expand sidebar on hover after 3 seconds
+    btn.addEventListener("mouseenter", () => {
+      if (sidebar && sidebar.classList.contains("collapsed")) {
+        hoverTimeout = window.setTimeout(() => {
+          if (sidebar && sidebar.classList.contains("collapsed")) {
+            sidebar.classList.remove("collapsed");
+            localStorage.setItem("sidebar-expanded", "true");
+            // Don't set sidebarManuallyToggled - this was expanded via hover, so it should auto-collapse
+            // Cancel any pending auto-collapse
+            if (autoCollapseTimeout) {
+              clearTimeout(autoCollapseTimeout);
+              autoCollapseTimeout = null;
+            }
+          }
+          hoverTimeout = null;
+        }, HOVER_EXPAND_DELAY);
+      }
+    });
+
+    btn.addEventListener("mouseleave", () => {
+      if (hoverTimeout) {
+        clearTimeout(hoverTimeout);
+        hoverTimeout = null;
+      }
+      // If sidebar is expanded and not manually toggled, schedule auto-collapse
+      if (sidebar && !sidebar.classList.contains("collapsed") && !sidebarManuallyToggled) {
+        scheduleAutoCollapse();
+      }
+    });
+
+    btn.addEventListener("click", () => {
       const view = btn.dataset.view;
       if (!view) return;
+
+      // If sidebar is expanded and not manually toggled, schedule auto-collapse
+      if (sidebar && !sidebar.classList.contains("collapsed") && !sidebarManuallyToggled) {
+        scheduleAutoCollapse();
+      }
 
       buttons.forEach((b) => b.classList.remove("nav-item-active"));
       btn.classList.add("nav-item-active");
@@ -1348,6 +1454,30 @@ function setupNav(): void {
       if (el) el.classList.add("view-active");
     });
   });
+}
+
+function scheduleAutoCollapse(): void {
+  if (autoCollapseTimeout) {
+    clearTimeout(autoCollapseTimeout);
+  }
+
+  // Only auto-collapse if sidebar wasn't manually toggled
+  if (sidebarManuallyToggled) {
+    return;
+  }
+
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar || sidebar.classList.contains("collapsed")) {
+    return;
+  }
+
+  autoCollapseTimeout = window.setTimeout(() => {
+    if (sidebar && !sidebarManuallyToggled) {
+      sidebar.classList.add("collapsed");
+      localStorage.setItem("sidebar-expanded", "false");
+    }
+    autoCollapseTimeout = null;
+  }, AUTO_COLLAPSE_DELAY);
 }
 
 /* ---------- RUN NOW ---------- */
