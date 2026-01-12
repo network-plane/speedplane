@@ -130,25 +130,19 @@ async function loadSummary(): Promise<void> {
     $("latest-download-value").textContent = formatNumber(
       data.latest.download_mbps,
     );
-    $("latest-download-sub").textContent = "Mbps";
     $("latest-upload-value").textContent = formatNumber(
       data.latest.upload_mbps,
     );
-    $("latest-upload-sub").textContent = "Mbps";
     $("latest-ping-value").textContent = formatNumber(data.latest.ping_ms, 1);
-    $("latest-ping-sub").textContent = "ms";
     $("latest-jitter-value").textContent = formatNumber(
       data.latest.jitter_ms ?? 0,
       1,
     );
-    $("latest-jitter-sub").textContent = "ms";
     const packetLoss = data.latest.packet_loss_pct ?? -1;
     if (packetLoss < 0) {
       $("latest-packetloss-value").textContent = "—";
-      $("latest-packetloss-sub").textContent = "";
     } else {
       $("latest-packetloss-value").textContent = formatNumber(packetLoss, 2);
-      $("latest-packetloss-sub").textContent = "%";
     }
 
     // Update comparison indicators
