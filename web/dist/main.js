@@ -440,18 +440,7 @@
     }
     const centerX = width / 2;
     const boxWidth = innerW * 0.4;
-    const whisker = (y1, y2, x) => {
-      const line = document.createElementNS(svgNS, "line");
-      line.setAttribute("x1", x.toString());
-      line.setAttribute("x2", x.toString());
-      line.setAttribute("y1", y1.toString());
-      line.setAttribute("y2", y2.toString());
-      line.setAttribute("stroke", "rgba(255,255,255,0.5)");
-      line.setAttribute("stroke-width", "0.4");
-      svg.appendChild(line);
-    };
-    whisker(yPos(stats.min), yPos(stats.p10), centerX);
-    whisker(yPos(stats.p90), yPos(stats.max), centerX);
+    const whiskerCapWidth = 6;
     const boxY1 = yPos(stats.q3);
     const boxY2 = yPos(stats.q1);
     const box = document.createElementNS(svgNS, "rect");
@@ -459,9 +448,9 @@
     box.setAttribute("y", boxY1.toString());
     box.setAttribute("width", boxWidth.toString());
     box.setAttribute("height", (boxY2 - boxY1).toString());
-    box.setAttribute("fill", "rgba(255,179,65,0.2)");
-    box.setAttribute("stroke", "rgba(255,179,65,0.6)");
-    box.setAttribute("stroke-width", "0.5");
+    box.setAttribute("fill", "#ffb341");
+    box.setAttribute("stroke", "rgba(255,179,65,0.8)");
+    box.setAttribute("stroke-width", "0.3");
     svg.appendChild(box);
     const medianY = yPos(stats.median);
     const medianLine = document.createElementNS(svgNS, "line");
@@ -469,27 +458,43 @@
     medianLine.setAttribute("x2", (centerX + boxWidth / 2).toString());
     medianLine.setAttribute("y1", medianY.toString());
     medianLine.setAttribute("y2", medianY.toString());
-    medianLine.setAttribute("stroke", "#ffb341");
-    medianLine.setAttribute("stroke-width", "1");
+    medianLine.setAttribute("stroke", "#ff8c00");
+    medianLine.setAttribute("stroke-width", "1.2");
     svg.appendChild(medianLine);
-    const markers = [
-      { val: stats.min, label: "Min", color: "rgba(255,255,255,0.6)" },
-      { val: stats.p10, label: "P10", color: "rgba(255,255,255,0.5)" },
-      { val: stats.q1, label: "Q1", color: "rgba(255,179,65,0.7)" },
-      { val: stats.median, label: "Med", color: "#ffb341" },
-      { val: stats.q3, label: "Q3", color: "rgba(255,179,65,0.7)" },
-      { val: stats.p90, label: "P90", color: "rgba(255,255,255,0.5)" },
-      { val: stats.max, label: "Max", color: "rgba(255,255,255,0.6)" }
-    ];
-    markers.forEach((m) => {
-      const y = yPos(m.val);
-      const circle = document.createElementNS(svgNS, "circle");
-      circle.setAttribute("cx", centerX.toString());
-      circle.setAttribute("cy", y.toString());
-      circle.setAttribute("r", "1");
-      circle.setAttribute("fill", m.color);
-      svg.appendChild(circle);
-    });
+    const upperWhiskerY = yPos(stats.max);
+    const upperWhisker = document.createElementNS(svgNS, "line");
+    upperWhisker.setAttribute("x1", centerX.toString());
+    upperWhisker.setAttribute("x2", centerX.toString());
+    upperWhisker.setAttribute("y1", boxY1.toString());
+    upperWhisker.setAttribute("y2", upperWhiskerY.toString());
+    upperWhisker.setAttribute("stroke", "rgba(255,255,255,0.4)");
+    upperWhisker.setAttribute("stroke-width", "0.4");
+    svg.appendChild(upperWhisker);
+    const upperCap = document.createElementNS(svgNS, "line");
+    upperCap.setAttribute("x1", (centerX - whiskerCapWidth / 2).toString());
+    upperCap.setAttribute("x2", (centerX + whiskerCapWidth / 2).toString());
+    upperCap.setAttribute("y1", upperWhiskerY.toString());
+    upperCap.setAttribute("y2", upperWhiskerY.toString());
+    upperCap.setAttribute("stroke", "rgba(255,255,255,0.4)");
+    upperCap.setAttribute("stroke-width", "0.4");
+    svg.appendChild(upperCap);
+    const lowerWhiskerY = yPos(stats.min);
+    const lowerWhisker = document.createElementNS(svgNS, "line");
+    lowerWhisker.setAttribute("x1", centerX.toString());
+    lowerWhisker.setAttribute("x2", centerX.toString());
+    lowerWhisker.setAttribute("y1", boxY2.toString());
+    lowerWhisker.setAttribute("y2", lowerWhiskerY.toString());
+    lowerWhisker.setAttribute("stroke", "rgba(255,255,255,0.4)");
+    lowerWhisker.setAttribute("stroke-width", "0.4");
+    svg.appendChild(lowerWhisker);
+    const lowerCap = document.createElementNS(svgNS, "line");
+    lowerCap.setAttribute("x1", (centerX - whiskerCapWidth / 2).toString());
+    lowerCap.setAttribute("x2", (centerX + whiskerCapWidth / 2).toString());
+    lowerCap.setAttribute("y1", lowerWhiskerY.toString());
+    lowerCap.setAttribute("y2", lowerWhiskerY.toString());
+    lowerCap.setAttribute("stroke", "rgba(255,255,255,0.4)");
+    lowerCap.setAttribute("stroke-width", "0.4");
+    svg.appendChild(lowerCap);
     const statsText = document.createElementNS(svgNS, "text");
     statsText.setAttribute("x", centerX.toString());
     statsText.setAttribute("y", (height - paddingBottom + 6).toString());
@@ -851,6 +856,7 @@
   async function updateCombinedChart() {
     const select = $("range-combined");
     const value = select.value || "24h";
+    localStorage.setItem("chart-range-combined", value);
     const rows = await loadHistoryForRange(value);
     renderCombinedChart("combined-chart", rows);
   }
@@ -1172,46 +1178,74 @@
     const ut = $("chart-type-upload");
     const lt = $("chart-type-latency");
     const jt = $("chart-type-jitter");
+    const savedRangeDownload = localStorage.getItem("chart-range-download");
+    const savedRangeUpload = localStorage.getItem("chart-range-upload");
+    const savedRangeLatency = localStorage.getItem("chart-range-latency");
+    const savedRangeJitter = localStorage.getItem("chart-range-jitter");
+    const savedPercentileDownload = localStorage.getItem("chart-percentile-download") === "true";
+    const savedPercentileUpload = localStorage.getItem("chart-percentile-upload") === "true";
+    const savedPercentileLatency = localStorage.getItem("chart-percentile-latency") === "true";
+    const savedPercentileJitter = localStorage.getItem("chart-percentile-jitter") === "true";
+    if (savedRangeDownload) d.value = savedRangeDownload;
+    if (savedRangeUpload) u.value = savedRangeUpload;
+    if (savedRangeLatency) l.value = savedRangeLatency;
+    if (savedRangeJitter) j.value = savedRangeJitter;
+    if (savedPercentileDownload) dt?.classList.add("active");
+    if (savedPercentileUpload) ut?.classList.add("active");
+    if (savedPercentileLatency) lt?.classList.add("active");
+    if (savedPercentileJitter) jt?.classList.add("active");
     d.addEventListener("change", () => {
+      localStorage.setItem("chart-range-download", d.value);
       updateDownloadChart().catch(
         (err) => console.error("updateDownloadChart", err)
       );
     });
     u.addEventListener("change", () => {
+      localStorage.setItem("chart-range-upload", u.value);
       updateUploadChart().catch(
         (err) => console.error("updateUploadChart", err)
       );
     });
     l.addEventListener("change", () => {
+      localStorage.setItem("chart-range-latency", l.value);
       updateLatencyChart().catch(
         (err) => console.error("updateLatencyChart", err)
       );
     });
     j.addEventListener("change", () => {
+      localStorage.setItem("chart-range-jitter", j.value);
       updateJitterChart().catch(
         (err) => console.error("updateJitterChart", err)
       );
     });
     dt?.addEventListener("click", () => {
       dt.classList.toggle("active");
+      const isActive = dt.classList.contains("active");
+      localStorage.setItem("chart-percentile-download", isActive ? "true" : "false");
       updateDownloadChart().catch(
         (err) => console.error("updateDownloadChart", err)
       );
     });
     ut?.addEventListener("click", () => {
       ut.classList.toggle("active");
+      const isActive = ut.classList.contains("active");
+      localStorage.setItem("chart-percentile-upload", isActive ? "true" : "false");
       updateUploadChart().catch(
         (err) => console.error("updateUploadChart", err)
       );
     });
     lt?.addEventListener("click", () => {
       lt.classList.toggle("active");
+      const isActive = lt.classList.contains("active");
+      localStorage.setItem("chart-percentile-latency", isActive ? "true" : "false");
       updateLatencyChart().catch(
         (err) => console.error("updateLatencyChart", err)
       );
     });
     jt?.addEventListener("click", () => {
       jt.classList.toggle("active");
+      const isActive = jt.classList.contains("active");
+      localStorage.setItem("chart-percentile-jitter", isActive ? "true" : "false");
       updateJitterChart().catch(
         (err) => console.error("updateJitterChart", err)
       );
@@ -1333,7 +1367,12 @@
         reloadCharts();
       }
     });
+    const savedCombinedRange = localStorage.getItem("chart-range-combined");
+    if (savedCombinedRange) {
+      combinedRangeSelect.value = savedCombinedRange;
+    }
     combinedRangeSelect.addEventListener("change", () => {
+      localStorage.setItem("chart-range-combined", combinedRangeSelect.value);
       if (checkbox.checked) {
         reloadCharts();
       }
