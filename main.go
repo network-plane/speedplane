@@ -10,7 +10,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"speedplane/api"
 	"speedplane/config"
@@ -60,6 +62,13 @@ var configGenerateCmd = &cobra.Command{
 	Run:   runConfigGenerate,
 }
 
+var configSystemdCmd = &cobra.Command{
+	Use:   "systemd",
+	Short: "Generate a systemd service file",
+	Long:  "Generate a systemd service file for speedplane in the current directory. Use --deploy to install it to /etc/systemd/system/ and reload systemd.",
+	Run:   runConfigSystemd,
+}
+
 func init() {
 	wd, _ := os.Getwd()
 	rootCmd.Version = appVersion
@@ -70,7 +79,10 @@ func init() {
 	rootCmd.Flags().BoolVar(&public, "public", false, "Enable public dashboard access")
 
 	configGenerateCmd.Flags().StringVar(&dataDir, "data-dir", wd, "Data directory where config file will be created (default: current directory)")
+	configSystemdCmd.Flags().Bool("deploy", false, "Deploy the service file to /etc/systemd/system/ and reload systemd daemon")
+	configSystemdCmd.Flags().StringVar(&dataDir, "data-dir", wd, "Data directory to use in the service file (default: current directory)")
 	configCmd.AddCommand(configGenerateCmd)
+	configCmd.AddCommand(configSystemdCmd)
 	rootCmd.AddCommand(configCmd)
 }
 
@@ -324,6 +336,135 @@ func runConfigGenerate(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Printf("Generated default config file: %s\n", cfgPath)
+}
+
+func runConfigSystemd(cmd *cobra.Command, args []string) {
+	deploy, _ := cmd.Flags().GetBool("deploy")
+
+	// Get the binary path
+	binPath, err := os.Executable()
+	if err != nil {
+		log.Fatalf("failed to get executable path: %v", err)
+	}
+	binPath, err = filepath.Abs(binPath)
+	if err != nil {
+		log.Fatalf("failed to resolve binary path: %v", err)
+	}
+
+	// Get data directory - use flag if explicitly set, otherwise try to load from config
+	var dataDirToUse string
+	var cfg config.Config
+	if cmd.Flags().Changed("data-dir") {
+		dataDirToUse = dataDir
+		// Load config to get db path
+		cfg, _ = config.Load(dataDir)
+	} else {
+		// Try to load from config in current directory or default location
+		cfg, err = config.Load(dataDir)
+		if err == nil && cfg.DataDir != "" && cfg.DataDir != "." {
+			dataDirToUse = cfg.DataDir
+		} else {
+			dataDirToUse = dataDir
+		}
+	}
+	dataDirAbs, err := filepath.Abs(dataDirToUse)
+	if err != nil {
+		log.Fatalf("resolve data dir: %v", err)
+	}
+
+	// Resolve db path (using the same logic as storage.New)
+	var dbPathToUse string
+	if cfg.DBPath == "" {
+		dbPathToUse = filepath.Join(dataDirAbs, "speedplane.results")
+	} else {
+		// Use the db path from config as-is (it will be resolved by storage.New)
+		dbPathToUse = cfg.DBPath
+		// If it's relative, make it absolute relative to dataDir
+		if !filepath.IsAbs(dbPathToUse) {
+			dbPathToUse = filepath.Join(dataDirAbs, dbPathToUse)
+		}
+	}
+
+	// Get current user for the service
+	currentUser, err := user.Current()
+	if err != nil {
+		log.Fatalf("failed to get current user: %v", err)
+	}
+
+	// Build ExecStart command with all necessary flags
+	execStart := fmt.Sprintf("%s --data-dir %s --db %s", binPath, dataDirAbs, dbPathToUse)
+
+	// Generate service file content
+	serviceContent := fmt.Sprintf(`[Unit]
+Description=Speedplane - Speedtest tracker and dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=%s
+Group=%s
+WorkingDirectory=%s
+ExecStart=%s
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=speedplane
+
+[Install]
+WantedBy=multi-user.target
+`, currentUser.Username, currentUser.Username, dataDirAbs, execStart)
+
+	// Write service file to current directory
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("failed to get working directory: %v", err)
+	}
+	serviceFilePath := filepath.Join(wd, "speedplane.service")
+
+	// Check if service file already exists
+	if _, err := os.Stat(serviceFilePath); err == nil {
+		log.Fatalf("service file already exists: %s", serviceFilePath)
+	}
+
+	if err := os.WriteFile(serviceFilePath, []byte(serviceContent), 0644); err != nil {
+		log.Fatalf("failed to write service file: %v", err)
+	}
+
+	fmt.Printf("Generated systemd service file: %s\n", serviceFilePath)
+
+	if deploy {
+		// Copy to /etc/systemd/system/
+		targetPath := "/etc/systemd/system/speedplane.service"
+		fmt.Printf("Copying service file to %s...\n", targetPath)
+
+		// Use sudo cp to copy the file
+		cpCmd := exec.Command("sudo", "cp", serviceFilePath, targetPath)
+		cpCmd.Stdout = os.Stdout
+		cpCmd.Stderr = os.Stderr
+		if err := cpCmd.Run(); err != nil {
+			log.Fatalf("failed to copy service file: %v", err)
+		}
+
+		// Set proper permissions
+		chmodCmd := exec.Command("sudo", "chmod", "644", targetPath)
+		if err := chmodCmd.Run(); err != nil {
+			log.Fatalf("failed to set permissions: %v", err)
+		}
+
+		// Reload systemd daemon
+		fmt.Println("Reloading systemd daemon...")
+		reloadCmd := exec.Command("sudo", "systemctl", "daemon-reload")
+		reloadCmd.Stdout = os.Stdout
+		reloadCmd.Stderr = os.Stderr
+		if err := reloadCmd.Run(); err != nil {
+			log.Fatalf("failed to reload systemd daemon: %v", err)
+		}
+
+		fmt.Printf("Service file deployed successfully!\n")
+		fmt.Printf("You can now start the service with: sudo systemctl start speedplane\n")
+		fmt.Printf("Enable it to start on boot with: sudo systemctl enable speedplane\n")
+	}
 }
 
 func printListeningAddresses(addr string) {

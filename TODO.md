@@ -1,7 +1,9 @@
 # speedplane TODO
 
 - [ ] Implement packaging and install scripts:
-  - [ ] Systemd unit file for running `speedplane` as a service.
+  - [x] Systemd unit file for running `speedplane` as a service (Linux).
+  - [ ] LaunchAgent/LaunchDaemon plist file for running `speedplane` as a service (macOS).
+  - [ ] Windows Service configuration for running `speedplane` as a service (Windows).
   - [x] Default config file (e.g., `/etc/speedplane/speedplane.config`).
   - [x] Create data dir `/var/lib/speedplane` with correct permissions.
 
