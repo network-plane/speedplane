@@ -258,84 +258,100 @@
           </div>
         </div>
 
-        <div class="panel">
+        <div class="panel" id="combined-chart-panel" style="display: none;">
           <div class="panel-header">
-            <div class="panel-title">Download (Mbps)</div>
+            <div class="panel-title">All Metrics</div>
             <div style="display: flex; gap: 12px; align-items: center;">
-              <select id="range-download" class="select">
+              <select id="range-combined" class="select">
                 <option value="24h">Last 24h</option>
                 <option value="7d">Last 7 days</option>
                 <option value="30d">Last 30 days</option>
               </select>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 11px; color: var(--muted);">Percentile</span>
-                <button type="button" class="chart-toggle" id="chart-type-download">
-                  <span class="chart-toggle-slider"></span>
-                </button>
-              </div>
             </div>
           </div>
-          <div class="chart" id="download-chart"></div>
+          <div class="chart" id="combined-chart"></div>
         </div>
 
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title">Upload (Mbps)</div>
-            <div style="display: flex; gap: 12px; align-items: center;">
-              <select id="range-upload" class="select">
-                <option value="24h">Last 24h</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-              </select>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 11px; color: var(--muted);">Percentile</span>
-                <button type="button" class="chart-toggle" id="chart-type-upload">
-                  <span class="chart-toggle-slider"></span>
-                </button>
+        <div id="individual-charts">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Download (Mbps)</div>
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <select id="range-download" class="select">
+                  <option value="24h">Last 24h</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                </select>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11px; color: var(--muted);">Percentile</span>
+                  <button type="button" class="chart-toggle" id="chart-type-download">
+                    <span class="chart-toggle-slider"></span>
+                  </button>
+                </div>
               </div>
             </div>
+            <div class="chart" id="download-chart"></div>
           </div>
-          <div class="chart" id="upload-chart"></div>
-        </div>
 
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title">Latency (ms)</div>
-            <div style="display: flex; gap: 12px; align-items: center;">
-              <select id="range-latency" class="select">
-                <option value="24h">Last 24h</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-              </select>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 11px; color: var(--muted);">Percentile</span>
-                <button type="button" class="chart-toggle" id="chart-type-latency">
-                  <span class="chart-toggle-slider"></span>
-                </button>
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Upload (Mbps)</div>
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <select id="range-upload" class="select">
+                  <option value="24h">Last 24h</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                </select>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11px; color: var(--muted);">Percentile</span>
+                  <button type="button" class="chart-toggle" id="chart-type-upload">
+                    <span class="chart-toggle-slider"></span>
+                  </button>
+                </div>
               </div>
             </div>
+            <div class="chart" id="upload-chart"></div>
           </div>
-          <div class="chart" id="latency-chart"></div>
-        </div>
 
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title">Jitter (ms)</div>
-            <div style="display: flex; gap: 12px; align-items: center;">
-              <select id="range-jitter" class="select">
-                <option value="24h">Last 24h</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-              </select>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 11px; color: var(--muted);">Percentile</span>
-                <button type="button" class="chart-toggle" id="chart-type-jitter">
-                  <span class="chart-toggle-slider"></span>
-                </button>
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Latency (ms)</div>
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <select id="range-latency" class="select">
+                  <option value="24h">Last 24h</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                </select>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11px; color: var(--muted);">Percentile</span>
+                  <button type="button" class="chart-toggle" id="chart-type-latency">
+                    <span class="chart-toggle-slider"></span>
+                  </button>
+                </div>
               </div>
             </div>
+            <div class="chart" id="latency-chart"></div>
           </div>
-          <div class="chart" id="jitter-chart"></div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Jitter (ms)</div>
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <select id="range-jitter" class="select">
+                  <option value="24h">Last 24h</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                </select>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11px; color: var(--muted);">Percentile</span>
+                  <button type="button" class="chart-toggle" id="chart-type-jitter">
+                    <span class="chart-toggle-slider"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="chart" id="jitter-chart"></div>
+          </div>
         </div>
 
         <div style="display: flex; gap: 8px; justify-content: center; margin-top: 16px;">
@@ -390,6 +406,28 @@
               <div class="form-field">
                 <label>Color Scheme</label>
                 <select id="pref-scheme"></select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Dashboard</div>
+          </div>
+          <div class="form">
+            <div class="form-row form-row-inline">
+              <div class="form-field">
+                <label style="display: flex; align-items: center; gap: 8px;">
+                  <input type="checkbox" id="pref-combined-graph" style="width: auto;" />
+                  <span>Show combined graph (all metrics in one)</span>
+                </label>
+              </div>
+              <div class="form-field">
+                <label style="display: flex; align-items: center; gap: 8px;">
+                  <input type="checkbox" id="pref-logarithmic-scale" style="width: auto;" />
+                  <span>Logarithmic scale</span>
+                </label>
               </div>
             </div>
           </div>
