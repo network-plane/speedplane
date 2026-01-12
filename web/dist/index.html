@@ -8,6 +8,57 @@
   <style id="theme-css">
     /* Theme CSS loaded dynamically from /api/theme */
   </style>
+  <style>
+    /* Speedplane-specific styles */
+    .about-section{
+      text-align:center;
+      padding:20px;
+    }
+    .about-logo{
+      color:var(--accent);
+      margin-bottom:16px;
+    }
+    .about-section h3{
+      font-size:18px;
+      color:var(--txt);
+      margin-bottom:4px;
+      text-transform:none;
+      letter-spacing:0;
+    }
+    .about-version{
+      color:var(--muted);
+      font-size:12px;
+      margin-bottom:16px;
+    }
+    .about-desc{
+      color:var(--txt);
+      font-size:13px;
+      line-height:1.6;
+      margin-bottom:20px;
+    }
+    .about-links{
+      margin-bottom:20px;
+    }
+    .about-links a{
+      color:var(--accent);
+      text-decoration:none;
+      font-size:13px;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+    }
+    .about-links a:hover{
+      text-decoration:underline;
+    }
+    .about-copyright{
+      color:var(--muted);
+      font-size:11px;
+    }
+    .header .search{
+      margin-left:auto;
+      justify-content:flex-end;
+    }
+  </style>
 </head>
 <body>
 <script>
@@ -53,7 +104,7 @@
     <div class="brand">
       <div class="dot"></div>
       <div>
-        <div class="h-title">Speedtest Tracker</div>
+        <div class="h-title">speedplane</div>
         <div class="h-sub" id="subtitle">Dashboard</div>
       </div>
     </div>
@@ -64,17 +115,14 @@
 
   <aside class="sidebar collapsed" id="sidebar">
     <div class="sidebar-header">
-      <div class="app-title">Speedtest Tracker</div>
+      <div class="app-title">speedplane</div>
     </div>
     <nav class="sidebar-nav">
       <button class="nav-item nav-item-active" data-view="dashboard" data-letter="D"><span>Dashboard</span></button>
       <button class="nav-item" data-view="history" data-letter="R"><span>Results</span></button>
       <button class="nav-item" data-view="preferences" data-letter="P"><span>Preferences</span></button>
+      <button class="nav-item" data-view="about" data-letter="A"><span>About</span></button>
     </nav>
-    <div class="sidebar-section">
-      <div class="sidebar-section-title">Links</div>
-      <a class="nav-link" href="https://github.com" target="_blank" rel="noreferrer">GitHub</a>
-    </div>
     <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar">
       <i class="fas fa-chevron-left"></i>
       <span>Collapse</span>
@@ -256,6 +304,21 @@
             </div>
             <button type="button" class="btn" id="schedule-form-cancel" style="display: none;">Cancel</button>
           </form>
+        </div>
+      </section>
+
+      <section id="view-about" class="view">
+        <div class="panel">
+          <div class="about-section">
+            <div class="about-logo"><i class="fas fa-tachometer-alt fa-3x"></i></div>
+            <h3>speedplane</h3>
+            <p class="about-version">Version {{.AppVersion}}</p>
+            <p class="about-desc">A service with a web UI that runs speedtests on a schedule (or manually).</p>
+            <div class="about-links">
+              <a href="https://github.com/network-plane/speedplane" target="_blank" rel="noreferrer"><i class="fab fa-github"></i> Source Code</a>
+            </div>
+            <p class="about-copyright">© {{.Year}} network-plane</p>
+          </div>
         </div>
       </section>
     </div>

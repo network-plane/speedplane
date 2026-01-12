@@ -37,12 +37,12 @@ var (
 	listen     string
 	listenPort int
 	public     bool
-	appVersion = "0.1.5"
+	appVersion = "0.1.8"
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "speedplane",
-	Short: "Speedtest tracker and dashboard",
+	Short: "speedplane – Speedtest tracker and dashboard",
 	Long:  "Speedplane is a tool for tracking internet speedtest results with a web dashboard.",
 	Run:   run,
 }
@@ -159,13 +159,14 @@ func run(cmd *cobra.Command, args []string) {
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = indexTemplate.Execute(w, map[string]any{
-			"Title":            "speedplane – Speedtest Tracker",
+			"Title":            "speedplane",
 			"TemplatesList":    templatesList,
 			"TemplateMenuHTML": template.HTML(templateMenuHTML),
 			"SchemeMenuHTML":   template.HTML(schemeMenuHTML),
 			"CurrentTemplate":  templateName,
 			"CurrentScheme":    schemeName,
 			"AppVersion":       appVersion,
+			"Year":             time.Now().Year(),
 		})
 	})
 
