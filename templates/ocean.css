@@ -345,8 +345,8 @@ a{color:inherit}
 .header .timer-circle{
   margin-left:auto;
 }
-  width:14px;
-  height:14px;
+  width:28px;
+  height:28px;
   border-radius:50%;
   border:2px solid var(--border);
   background:rgba(59,130,246,.1);

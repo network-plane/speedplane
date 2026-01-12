@@ -427,8 +427,8 @@ func (s *Server) handleNextRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nextRun := s.sched.NextRunTime()
-	if nextRun == nil {
+	info := s.sched.NextRunInfo()
+	if info.NextRun == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"next_run": nil,
 		})
@@ -436,15 +436,16 @@ func (s *Server) handleNextRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	remaining := nextRun.Sub(now)
+	remaining := info.NextRun.Sub(now)
 	if remaining < 0 {
 		remaining = 0
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"next_run":  nextRun.UTC().Format(time.RFC3339),
-		"remaining": int64(remaining.Seconds()),
-		"timestamp": now.Unix(),
+		"next_run":          info.NextRun.UTC().Format(time.RFC3339),
+		"remaining":         int64(remaining.Seconds()),
+		"interval_duration": int64(info.IntervalDuration.Seconds()),
+		"timestamp":         now.Unix(),
 	})
 }
 

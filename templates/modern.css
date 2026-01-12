@@ -228,8 +228,8 @@ body{
     color:var(--accent);
   }
   .timer-circle{
-    width:16px;
-    height:16px;
+    width:32px;
+    height:32px;
     border-radius:50%;
     border:2px solid rgba(255,107,157,.3);
     background:rgba(255,107,157,.1);

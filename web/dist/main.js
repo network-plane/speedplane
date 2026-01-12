@@ -813,6 +813,7 @@
   var scheduleTimerInterval = null;
   var nextRunTime = null;
   var intervalDuration = null;
+  var intervalStartTime = null;
   var ws = null;
   async function updateScheduleTimer() {
     try {
@@ -825,11 +826,16 @@
           clearInterval(scheduleTimerInterval);
           scheduleTimerInterval = null;
         }
+        nextRunTime = null;
+        intervalDuration = null;
+        intervalStartTime = null;
         return;
       }
       timerEl.style.display = "block";
-      nextRunTime = new Date(data.next_run).getTime();
-      intervalDuration = data.remaining * 1e3;
+      const nextRun = new Date(data.next_run).getTime();
+      nextRunTime = nextRun;
+      intervalDuration = (data.interval_duration || 0) * 1e3;
+      intervalStartTime = nextRun - intervalDuration;
       updateTimerDisplay();
     } catch (err) {
       console.error("Failed to fetch next run time:", err);
@@ -837,10 +843,10 @@
   }
   function updateTimerDisplay() {
     const timerEl = document.getElementById("schedule-timer");
-    if (!timerEl || !nextRunTime || !intervalDuration) return;
+    if (!timerEl || !nextRunTime || !intervalDuration || !intervalStartTime) return;
     const now = Date.now();
-    const elapsed = now - (nextRunTime - intervalDuration);
     const remaining = Math.max(0, nextRunTime - now);
+    const elapsed = now - intervalStartTime;
     const percent = Math.min(100, Math.max(0, elapsed / intervalDuration * 100));
     const totalSeconds = Math.ceil(remaining / 1e3);
     const days = Math.floor(totalSeconds / 86400);

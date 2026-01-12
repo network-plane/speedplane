@@ -231,8 +231,8 @@ a{color:inherit}
 .header .timer-circle{
   margin-left:auto;
 }
-  width:14px;
-  height:14px;
+  width:28px;
+  height:28px;
   border-radius:50%;
   border:2px solid rgba(255,255,255,0.2);
   background:rgba(255,255,255,0.05);
@@ -272,7 +272,7 @@ a{color:inherit}
 .v{font-weight:600}
 .kv-vertical{
   display:flex;
-  
+
   gap:4px;
   padding:8px 0;
   border-top:1px solid var(--border);
@@ -459,7 +459,7 @@ a{color:inherit}
 }
 .week-calendar-grid .week-events{
   display:flex;
-  
+
   gap:2px;
 }
 .week-calendar-grid .week-event{

@@ -187,8 +187,20 @@ func (s *Scheduler) LastRun() map[string]time.Time {
 	return result
 }
 
+// NextRunInfo contains information about the next scheduled run
+type NextRunInfo struct {
+	NextRun        *time.Time
+	IntervalDuration time.Duration // Full interval duration (for progress calculation)
+}
+
 // NextRunTime calculates when the next scheduled speedtest will run
 func (s *Scheduler) NextRunTime() *time.Time {
+	info := s.NextRunInfo()
+	return info.NextRun
+}
+
+// NextRunInfo calculates when the next scheduled speedtest will run and returns interval info
+func (s *Scheduler) NextRunInfo() NextRunInfo {
 	s.mu.Lock()
 	scheds := make([]model.Schedule, len(s.schedules))
 	copy(scheds, s.schedules)
@@ -200,6 +212,7 @@ func (s *Scheduler) NextRunTime() *time.Time {
 
 	now := time.Now()
 	var nextTime *time.Time
+	var intervalDur time.Duration
 
 	for _, sc := range scheds {
 		if !sc.Enabled || sc.ID == "" {
@@ -207,6 +220,7 @@ func (s *Scheduler) NextRunTime() *time.Time {
 		}
 
 		var candidate time.Time
+		var candidateDur time.Duration
 		switch sc.Type {
 		case model.ScheduleInterval:
 			if sc.Every == "" {
@@ -216,6 +230,7 @@ func (s *Scheduler) NextRunTime() *time.Time {
 			if err != nil || dur <= 0 {
 				continue
 			}
+			candidateDur = dur
 			lastRun := last[sc.ID]
 			if lastRun.IsZero() {
 				candidate = now
@@ -254,6 +269,8 @@ func (s *Scheduler) NextRunTime() *time.Time {
 					candidate = today.AddDate(0, 0, 1)
 				}
 			}
+			// For daily schedules, interval is 24 hours
+			candidateDur = 24 * time.Hour
 
 		default:
 			continue
@@ -261,8 +278,12 @@ func (s *Scheduler) NextRunTime() *time.Time {
 
 		if nextTime == nil || candidate.Before(*nextTime) {
 			nextTime = &candidate
+			intervalDur = candidateDur
 		}
 	}
 
-	return nextTime
+	return NextRunInfo{
+		NextRun:         nextTime,
+		IntervalDuration: intervalDur,
+	}
 }

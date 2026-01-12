@@ -333,8 +333,8 @@ a{color:inherit}
 .header .timer-circle{
   margin-left:auto;
 }
-  width:14px;
-  height:14px;
+  width:28px;
+  height:28px;
   border-radius:50%;
   border:1px solid var(--border);
   background:rgba(255,20,147,.1);

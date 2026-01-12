@@ -1071,7 +1071,8 @@ function setupThemeSelection(): void {
 
 let scheduleTimerInterval: number | null = null;
 let nextRunTime: number | null = null;
-let intervalDuration: number | null = null;
+let intervalDuration: number | null = null; // Full interval duration in milliseconds
+let intervalStartTime: number | null = null; // When the current interval started
 let ws: WebSocket | null = null;
 
 async function updateScheduleTimer(): Promise<void> {
@@ -1079,6 +1080,7 @@ async function updateScheduleTimer(): Promise<void> {
     const data = await fetchJSON<{
       next_run: string | null;
       remaining: number;
+      interval_duration: number;
       timestamp: number;
     }>("/api/next-run");
 
@@ -1091,12 +1093,18 @@ async function updateScheduleTimer(): Promise<void> {
         clearInterval(scheduleTimerInterval);
         scheduleTimerInterval = null;
       }
+      nextRunTime = null;
+      intervalDuration = null;
+      intervalStartTime = null;
       return;
     }
 
     timerEl.style.display = "block";
-    nextRunTime = new Date(data.next_run).getTime();
-    intervalDuration = data.remaining * 1000;
+    const nextRun = new Date(data.next_run).getTime();
+    nextRunTime = nextRun;
+    intervalDuration = (data.interval_duration || 0) * 1000; // Convert to milliseconds
+    // Calculate when the current interval started: nextRun - intervalDuration
+    intervalStartTime = nextRun - intervalDuration;
     updateTimerDisplay();
   } catch (err) {
     console.error("Failed to fetch next run time:", err);
@@ -1105,11 +1113,12 @@ async function updateScheduleTimer(): Promise<void> {
 
 function updateTimerDisplay(): void {
   const timerEl = document.getElementById("schedule-timer");
-  if (!timerEl || !nextRunTime || !intervalDuration) return;
+  if (!timerEl || !nextRunTime || !intervalDuration || !intervalStartTime) return;
 
   const now = Date.now();
-  const elapsed = now - (nextRunTime - intervalDuration);
   const remaining = Math.max(0, nextRunTime - now);
+  // Calculate elapsed time since interval started
+  const elapsed = now - intervalStartTime;
   const percent = Math.min(100, Math.max(0, (elapsed / intervalDuration) * 100));
 
   const totalSeconds = Math.ceil(remaining / 1000);
