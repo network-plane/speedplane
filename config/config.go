@@ -46,7 +46,9 @@ func Load(dataDir string) (Config, error) {
         }
         return Config{}, err
     }
-    defer f.Close()
+    defer func() {
+        _ = f.Close()
+    }()
 
     var cfg Config
     if err := json.NewDecoder(f).Decode(&cfg); err != nil {
@@ -82,17 +84,19 @@ func Save(cfg Config) error {
     if err != nil {
         return err
     }
-    defer f.Close()
+    defer func() {
+        _ = f.Close()
+    }()
 
     enc := json.NewEncoder(f)
     enc.SetIndent("", "  ")
     if err := enc.Encode(cfg); err != nil {
-        os.Remove(tmp)
+        _ = os.Remove(tmp)
         return err
     }
 
     if err := f.Close(); err != nil {
-        os.Remove(tmp)
+        _ = os.Remove(tmp)
         return err
     }
 
