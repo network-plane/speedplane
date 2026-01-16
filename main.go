@@ -40,7 +40,7 @@ var (
 	listen     string
 	listenPort int
 	public     bool
-	appVersion = "0.1.28"
+	appVersion = "0.1.31"
 )
 
 var rootCmd = &cobra.Command{
