@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"speedplane/model"
@@ -34,15 +35,44 @@ func Default() Config {
     }
 }
 
-// Load reads and parses the configuration from the data directory.
+// ResolveConfigPath determines the final config file path based on the provided configPath.
+// If configPath is empty, uses current directory + "speedplane.config"
+// If configPath is a directory, appends "speedplane.config"
+// If configPath is a full path with filename, uses it as-is
+func ResolveConfigPath(configPath string) string {
+	if configPath == "" {
+		wd, _ := os.Getwd()
+		return filepath.Join(wd, "speedplane.config")
+	}
+
+	// Check if configPath is a directory (ends with separator or is an existing directory)
+	if strings.HasSuffix(configPath, string(filepath.Separator)) || strings.HasSuffix(configPath, "/") {
+		return filepath.Join(configPath, "speedplane.config")
+	}
+
+	// Check if it's an existing directory
+	if info, err := os.Stat(configPath); err == nil && info.IsDir() {
+		return filepath.Join(configPath, "speedplane.config")
+	}
+
+	// Otherwise, treat it as a full path with filename
+	return configPath
+}
+
+// Load reads and parses the configuration from the specified path.
+// configPath can be empty (uses current directory + "speedplane.config"), a directory (appends "speedplane.config"),
+// or a full path with filename (uses as-is).
 // If the config file doesn't exist, it returns a default configuration.
-func Load(dataDir string) (Config, error) {
-    cfgPath := filepath.Join(dataDir, "speedplane.config")
+func Load(configPath string) (Config, error) {
+    cfgPath := ResolveConfigPath(configPath)
 
     f, err := os.Open(cfgPath)
     if err != nil {
         if errors.Is(err, os.ErrNotExist) {
-            return Default(), nil
+            cfg := Default()
+            // Set DataDir to the directory containing where the config file would be
+            cfg.DataDir = filepath.Dir(cfgPath)
+            return cfg, nil
         }
         return Config{}, err
     }
@@ -55,10 +85,10 @@ func Load(dataDir string) (Config, error) {
         return Config{}, err
     }
 
+    // Set DataDir to the directory containing the config file
+    cfg.DataDir = filepath.Dir(cfgPath)
+
     def := Default()
-    if cfg.DataDir == "" {
-        cfg.DataDir = def.DataDir
-    }
     if cfg.ListenAddr == "" {
         cfg.ListenAddr = def.ListenAddr
     }

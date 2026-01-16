@@ -35,7 +35,7 @@ var templatesFS embed.FS
 var staticFS embed.FS
 
 var (
-	dataDir    string
+	configPath string
 	dbPath     string
 	listen     string
 	listenPort int
@@ -59,7 +59,7 @@ var configCmd = &cobra.Command{
 var configGenerateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate a default configuration file",
-	Long:  "Generate a default speedplane.config file in the specified data directory (or current directory if not specified).",
+	Long:  "Generate a default speedplane.config file at the specified path (or current directory if not specified).",
 	Run:   runConfigGenerate,
 }
 
@@ -71,36 +71,26 @@ var configSystemdCmd = &cobra.Command{
 }
 
 func init() {
-	wd, _ := os.Getwd()
 	rootCmd.Version = appVersion
-	rootCmd.Flags().StringVar(&dataDir, "data-dir", wd, "Data directory (default: current directory)")
+	rootCmd.Flags().StringVar(&configPath, "config", "", "Config file path (full path with filename, or directory to use default filename 'speedplane.config', default: current directory)")
 	rootCmd.Flags().StringVar(&dbPath, "db", "", "Database path (full path with filename, or directory to use default filename 'speedplane.results')")
 	rootCmd.Flags().StringVar(&listen, "listen", "all", "IP address to listen on (default: all)")
 	rootCmd.Flags().IntVar(&listenPort, "listen-port", 8080, "Port to listen on (default: 8080)")
 	rootCmd.Flags().BoolVar(&public, "public", false, "Enable public dashboard access")
 
-	configGenerateCmd.Flags().StringVar(&dataDir, "data-dir", wd, "Data directory where config file will be created (default: current directory)")
+	configGenerateCmd.Flags().StringVar(&configPath, "config", "", "Config file path (full path with filename, or directory to use default filename 'speedplane.config', default: current directory)")
 	configSystemdCmd.Flags().Bool("deploy", false, "Deploy the service file to /etc/systemd/system/ and reload systemd daemon")
-	configSystemdCmd.Flags().StringVar(&dataDir, "data-dir", wd, "Data directory to use in the service file (default: current directory)")
+	configSystemdCmd.Flags().StringVar(&configPath, "config", "", "Config file path (full path with filename, or directory to use default filename 'speedplane.config', default: current directory)")
 	configCmd.AddCommand(configGenerateCmd)
 	configCmd.AddCommand(configSystemdCmd)
 	rootCmd.AddCommand(configCmd)
 }
 
 func run(cmd *cobra.Command, args []string) {
-	// Load config from data-dir
-	cfg, err := config.Load(dataDir)
+	// Load config from config path
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
-	}
-
-	// Override config with CLI flags only if they were explicitly provided
-	if cmd.Flags().Changed("data-dir") {
-		cfg.DataDir = dataDir
-	} else if cfg.DataDir != "" && cfg.DataDir != "." {
-		// If data-dir flag wasn't provided but config file specifies one, use it
-		dataDir = cfg.DataDir
-		cfg.DataDir = dataDir
 	}
 
 	if cmd.Flags().Changed("listen") || cmd.Flags().Changed("listen-port") {
@@ -316,22 +306,24 @@ func run(cmd *cobra.Command, args []string) {
 }
 
 func runConfigGenerate(cmd *cobra.Command, args []string) {
-	// Ensure data directory exists and is absolute
-	dataDirAbs, err := filepath.Abs(dataDir)
-	if err != nil {
-		log.Fatalf("resolve data dir: %v", err)
+	// Resolve config path (like config.Load does)
+	cfgPath := config.ResolveConfigPath(configPath)
+
+	// Check if config file already exists
+	if _, err := os.Stat(cfgPath); err == nil {
+		log.Fatalf("config file already exists: %s", cfgPath)
+	}
+
+	// Get the directory where config will be saved
+	dataDirAbs := filepath.Dir(cfgPath)
+	if err := os.MkdirAll(dataDirAbs, 0o755); err != nil {
+		log.Fatalf("create config directory: %v", err)
 	}
 
 	// Create default config
 	cfg := config.Default()
 	cfg.DataDir = dataDirAbs
 	cfg.DBPath = filepath.Join(dataDirAbs, "speedplane.results")
-
-	// Check if config file already exists
-	cfgPath := filepath.Join(dataDirAbs, "speedplane.config")
-	if _, err := os.Stat(cfgPath); err == nil {
-		log.Fatalf("config file already exists: %s", cfgPath)
-	}
 
 	// Save default config
 	if err := config.Save(cfg); err != nil {
@@ -354,23 +346,14 @@ func runConfigSystemd(cmd *cobra.Command, args []string) {
 		log.Fatalf("failed to resolve binary path: %v", err)
 	}
 
-	// Get data directory - use flag if explicitly set, otherwise try to load from config
-	var dataDirToUse string
-	var cfg config.Config
-	if cmd.Flags().Changed("data-dir") {
-		dataDirToUse = dataDir
-		// Load config to get db path
-		cfg, _ = config.Load(dataDir)
-	} else {
-		// Try to load from config in current directory or default location
-		cfg, err = config.Load(dataDir)
-		if err == nil && cfg.DataDir != "" && cfg.DataDir != "." {
-			dataDirToUse = cfg.DataDir
-		} else {
-			dataDirToUse = dataDir
-		}
+	// Load config to get data directory and db path
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
 	}
-	dataDirAbs, err := filepath.Abs(dataDirToUse)
+
+	// Use DataDir from config (which is the directory containing the config file)
+	dataDirAbs, err := filepath.Abs(cfg.DataDir)
 	if err != nil {
 		log.Fatalf("resolve data dir: %v", err)
 	}
@@ -395,7 +378,9 @@ func runConfigSystemd(cmd *cobra.Command, args []string) {
 	}
 
 	// Build ExecStart command with all necessary flags
-	execStart := fmt.Sprintf("%s --data-dir %s --db %s", binPath, dataDirAbs, dbPathToUse)
+	// Use --config with the resolved config path
+	cfgPath := config.ResolveConfigPath(configPath)
+	execStart := fmt.Sprintf("%s --config %s --db %s", binPath, cfgPath, dbPathToUse)
 
 	// Generate service file content
 	serviceContent := fmt.Sprintf(`[Unit]

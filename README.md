@@ -44,11 +44,11 @@ go build -o speedplane .
 
 ## Configuration
 
-Speedplane can be configured via a config file or command-line flags. The config file `speedplane.config` should be placed in the data directory (default: current directory).
+Speedplane can be configured via a config file or command-line flags. The config file `speedplane.config` can be placed anywhere, or in the current directory by default.
 
 ### Config File Format
 
-Create a `speedplane.config` file in your data directory:
+Create a `speedplane.config` file:
 
 ```json
 {
@@ -61,7 +61,7 @@ Create a `speedplane.config` file in your data directory:
 
 ### Command-Line Flags
 
-- `--data-dir string` - Data directory (default: current directory)
+- `--config string` - Config file path (full path with filename, or directory to use default filename 'speedplane.config', default: current directory)
 - `--db string` - Database path (full path with filename, or directory to use default filename 'speedplane.results')
 - `--listen string` - IP address to listen on (default: "all" - listens on all interfaces)
 - `--listen-port int` - Port to listen on (default: 8080)
@@ -70,6 +70,11 @@ Create a `speedplane.config` file in your data directory:
 - `--help, -h` - Show help message
 
 Command-line flags override values from the config file.
+
+Both `--config` and `--db` flags work the same way:
+- If a directory is provided, the default filename (`speedplane.config` or `speedplane.results`) is appended
+- If a full file path is provided, it's used as-is
+- If empty, defaults to the current directory
 
 ## Usage
 
@@ -81,10 +86,14 @@ Start speedplane with default settings (listens on all interfaces, port 8080):
 ./speedplane
 ```
 
-### Custom Data Directory
+### Custom Config File Location
 
 ```bash
-./speedplane --data-dir /var/lib/speedplane
+# Using a directory (looks for speedplane.config inside)
+./speedplane --config /etc/speedplane
+
+# Using a specific config file
+./speedplane --config /etc/speedplane/custom.config
 ```
 
 ### Listen on Specific Interface
@@ -138,14 +147,14 @@ Schedules can be created via the API or web interface. Two types are supported:
 
 ## Data Storage
 
-Speedtest results are stored in a SQLite database. By default, the database is stored as `speedplane.results` in the data directory. You can customize the database path using the `--db` flag or `db_path` config option:
+Speedtest results are stored in a SQLite database. By default, the database is stored as `speedplane.results` in the same directory as the config file. You can customize the database path using the `--db` flag or `db_path` config option:
 
-- If `db_path` is empty: uses `{data_dir}/speedplane.results`
+- If `db_path` is empty: uses `{data_dir}/speedplane.results` (where `data_dir` is the directory containing the config file)
 - If `db_path` is a directory: uses `{db_path}/speedplane.results`
 - If `db_path` is a full path with filename: uses it as-is
 
 ```
-data-dir/
+/path/to/config/
   speedplane.results  # SQLite database containing all speedtest results (default)
   speedplane.config
 ```

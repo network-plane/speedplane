@@ -16,4 +16,6 @@
 - [x] sidebar when contracted should not expand when clicking on a menu link unless the user hovers over the menu link for more than 2 seconds
 - [x] sidebar unless the toggle is clicked should auto collapse
 - [x] manual run should not store results in the database by default, add a preference for this, if the user enables it then the results are stored in the database
+- [x] Fix memory leak: Create fresh speedtest client for each run instead of reusing (prevents 7GB+ memory accumulation)
+- [x] Refactor `--data-dir` to `--config` flag (works like `--db`: accepts directory or file path)
 - [ ] add a release checker to check for updates and notify the user
