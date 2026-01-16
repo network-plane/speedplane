@@ -15,15 +15,13 @@ import (
 )
 
 // Runner executes speed tests and returns results.
-type Runner struct {
-	client *st.Speedtest
-}
+// Note: A fresh speedtest client is created for each run to prevent memory leaks.
+// The speedtest-go library accumulates internal buffers when reusing clients.
+type Runner struct{}
 
 // NewRunner creates a new speedtest runner instance.
 func NewRunner() *Runner {
-	return &Runner{
-		client: st.New(),
-	}
+	return &Runner{}
 }
 
 // Run executes a complete speed test including ping, download, and upload tests.
@@ -41,9 +39,13 @@ func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string
 
 	progress("init", "Starting speedtest...")
 
+	// Create a fresh client for each speedtest run to prevent memory leaks.
+	// The speedtest-go library accumulates buffers internally when clients are reused.
+	client := st.New()
+
 	// Fetch user info
 	progress("user", "Fetching user info...")
-	user, err := r.client.FetchUserInfoContext(ctx)
+	user, err := client.FetchUserInfoContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch user info: %w", err)
 	}
@@ -51,7 +53,7 @@ func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string
 
 	// Fetch server list
 	progress("servers", "Fetching server list...")
-	servers, err := r.client.FetchServerListContext(ctx)
+	servers, err := client.FetchServerListContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch server list: %w", err)
 	}
