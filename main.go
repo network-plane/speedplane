@@ -14,6 +14,11 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"syscall"
+	"time"
+
+	"github.com/spf13/cobra"
+
 	"speedplane/api"
 	"speedplane/config"
 	"speedplane/model"
@@ -21,10 +26,6 @@ import (
 	"speedplane/speedtest"
 	"speedplane/storage"
 	"speedplane/theme"
-	"syscall"
-	"time"
-
-	"github.com/spf13/cobra"
 )
 
 //go:embed templates
@@ -128,7 +129,9 @@ func run(cmd *cobra.Command, args []string) {
 	if err != nil {
 		log.Fatalf("initialize storage: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		_ = store.Close()
+	}()
 
 	// Load schedules and lastRun from config
 	if cfg.Schedules == nil {
@@ -272,7 +275,7 @@ func run(cmd *cobra.Command, args []string) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-		w.Write(content)
+		_, _ = w.Write(content)
 	})
 	mux.HandleFunc("/main.js.map", func(w http.ResponseWriter, r *http.Request) {
 		content, err := staticFS.ReadFile("web/dist/main.js.map")
@@ -281,7 +284,7 @@ func run(cmd *cobra.Command, args []string) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Write(content)
+		_, _ = w.Write(content)
 	})
 	mux.HandleFunc("/styles.css", func(w http.ResponseWriter, r *http.Request) {
 		// Styles are now loaded via theme API, but keep for backwards compatibility
