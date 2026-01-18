@@ -231,9 +231,27 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
 	now := time.Now()
-	from := now.AddDate(0, 0, -30)
+	from := now.AddDate(0, 0, -30) // Default to 30 days
 	to := now
 
+	// Handle range parameter (24h, 7d, 30d)
+	if rangeParam := q.Get("range"); rangeParam != "" {
+		var days int
+		switch rangeParam {
+		case "24h":
+			days = 1
+		case "7d":
+			days = 7
+		case "30d":
+			days = 30
+		default:
+			http.Error(w, "invalid range, must be 24h, 7d, or 30d", http.StatusBadRequest)
+			return
+		}
+		from = now.AddDate(0, 0, -days)
+	}
+
+	// Handle custom from/to parameters (overrides range if both are provided)
 	if v := q.Get("from"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
