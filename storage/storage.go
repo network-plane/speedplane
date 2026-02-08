@@ -146,6 +146,24 @@ func (s *Store) SaveResult(res *model.SpeedtestResult) error {
 	return err
 }
 
+// CountResults returns the number of results within the specified time range.
+func (s *Store) CountResults(from, to time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	fromUTC := from.UTC().Format(time.RFC3339)
+	toUTC := to.UTC().Format(time.RFC3339)
+
+	query := `
+	SELECT COUNT(*)
+	FROM results
+	WHERE timestamp >= ? AND timestamp <= ?
+	`
+	var count int
+	err := s.db.QueryRow(query, fromUTC, toUTC).Scan(&count)
+	return count, err
+}
+
 // ListResults retrieves all speedtest results within the specified time range.
 // Results are sorted by timestamp in ascending order.
 func (s *Store) ListResults(from, to time.Time) ([]model.SpeedtestResult, error) {
@@ -203,6 +221,80 @@ func (s *Store) ListResults(from, to time.Time) ([]model.SpeedtestResult, error)
 		r.Timestamp = t.UTC()
 
 		// Handle raw JSON
+		if rawJSON.Valid {
+			r.RawJSON = json.RawMessage(rawJSON.String)
+		}
+
+		results = append(results, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// ListResultsPage retrieves a page of speedtest results within the specified time range.
+// Results are sorted by timestamp ascending. limit and offset are 0-based; use 0 for no limit.
+func (s *Store) ListResultsPage(from, to time.Time, limit, offset int) ([]model.SpeedtestResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	fromUTC := from.UTC().Format(time.RFC3339)
+	toUTC := to.UTC().Format(time.RFC3339)
+
+	query := `
+	SELECT id, timestamp, download_mbps, upload_mbps, ping_ms, jitter_ms,
+	       packet_loss_pct, isp, external_ip, server_id, server_name,
+	       server_country, raw_json
+	FROM results
+	WHERE timestamp >= ? AND timestamp <= ?
+	ORDER BY timestamp ASC
+	`
+	args := []interface{}{fromUTC, toUTC}
+	if limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, offset)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []model.SpeedtestResult
+	for rows.Next() {
+		var r model.SpeedtestResult
+		var timestampStr string
+		var rawJSON sql.NullString
+
+		err := rows.Scan(
+			&r.ID,
+			&timestampStr,
+			&r.DownloadMbps,
+			&r.UploadMbps,
+			&r.PingMs,
+			&r.JitterMs,
+			&r.PacketLossPct,
+			&r.ISP,
+			&r.ExternalIP,
+			&r.ServerID,
+			&r.ServerName,
+			&r.ServerCountry,
+			&rawJSON,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		t, err := time.Parse(time.RFC3339, timestampStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse timestamp: %w", err)
+		}
+		r.Timestamp = t.UTC()
+
 		if rawJSON.Valid {
 			r.RawJSON = json.RawMessage(rawJSON.String)
 		}
