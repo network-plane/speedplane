@@ -355,11 +355,11 @@
         </div>
       </section>
 
-      <section id="view-history" class="view">
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title">Results</div>
-            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <section id="view-history" class="view" style="width: 100%;">
+        <div class="panel" style="width: 100%;">
+          <div class="panel-header" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%;">
+            <div class="panel-title" style="flex: 0 0 auto;">Results</div>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: 1 1 auto; justify-content: flex-end;">
               <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted);">
                 <span>Items per page</span>
                 <select id="history-per-page" class="select" style="width: auto;">
@@ -379,7 +379,7 @@
               <a href="/api/export/history.csv" class="btn" download>Export CSV</a>
             </div>
           </div>
-          <table class="table" id="history-table">
+          <table class="table" id="history-table" style="width: 100%;">
             <thead>
               <tr>
                 <th>ID</th>
