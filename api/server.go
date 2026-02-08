@@ -234,21 +234,21 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	from := now.AddDate(0, 0, -30) // Default to 30 days
 	to := now
 
-	// Handle range parameter (24h, 7d, 30d)
+	// Handle range parameter (24h, 7d, 30d, all)
 	if rangeParam := q.Get("range"); rangeParam != "" {
-		var days int
 		switch rangeParam {
 		case "24h":
-			days = 1
+			from = now.AddDate(0, 0, -1)
 		case "7d":
-			days = 7
+			from = now.AddDate(0, 0, -7)
 		case "30d":
-			days = 30
+			from = now.AddDate(0, 0, -30)
+		case "all":
+			from = time.Time{} // Zero time for "all" (stored as 0001-01-01 in RFC3339)
 		default:
-			http.Error(w, "invalid range, must be 24h, 7d, or 30d", http.StatusBadRequest)
+			http.Error(w, "invalid range, must be 24h, 7d, 30d, or all", http.StatusBadRequest)
 			return
 		}
-		from = now.AddDate(0, 0, -days)
 	}
 
 	// Handle custom from/to parameters (overrides range if both are provided)
@@ -267,6 +267,34 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		to = t
+	}
+
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	if limit < 0 {
+		limit = 0
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	if limit > 0 {
+		// Paginated response: return { results, total }
+		total, err := s.store.CountResults(from, to)
+		if err != nil {
+			http.Error(w, "failed to count history", http.StatusInternalServerError)
+			return
+		}
+		results, err := s.store.ListResultsPage(from, to, limit, offset)
+		if err != nil {
+			http.Error(w, "failed to load history", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"results": results,
+			"total":   total,
+		})
+		return
 	}
 
 	results, err := s.store.ListResults(from, to)

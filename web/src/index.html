@@ -359,7 +359,22 @@
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title">Results</div>
-            <div style="display: flex; gap: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted);">
+                <span>Items per page</span>
+                <select id="history-per-page" class="select" style="width: auto;">
+                  <option value="50">50</option>
+                  <option value="100" selected>100</option>
+                  <option value="200">200</option>
+                </select>
+              </label>
+              <div id="history-pagination" style="display: flex; align-items: center; gap: 8px;">
+                <button type="button" class="btn" id="history-page-first" title="First page">«</button>
+                <button type="button" class="btn" id="history-page-prev" title="Previous page">‹</button>
+                <span id="history-page-info" style="font-size: 13px; color: var(--muted); min-width: 120px; text-align: center;">Page 1 of 1</span>
+                <button type="button" class="btn" id="history-page-next" title="Next page">›</button>
+                <button type="button" class="btn" id="history-page-last" title="Last page">»</button>
+              </div>
               <a href="/api/export/history.json" class="btn" download>Export JSON</a>
               <a href="/api/export/history.csv" class="btn" download>Export CSV</a>
             </div>

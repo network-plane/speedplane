@@ -194,10 +194,35 @@ async function loadSummary(): Promise<void> {
 
 /* ---------- HISTORY TABLE ---------- */
 
-async function loadHistoryTable(): Promise<void> {
-  const url = "/api/history?range=24h";
+type HistoryPageResponse = {
+  results: SpeedtestResult[];
+  total: number;
+};
 
-  const rows = await fetchJSON<SpeedtestResult[]>(url);
+let historyCurrentPage = 1;
+let historyTotal = 0;
+let historyPerPage = 100;
+
+function getHistoryPageCount(): number {
+  if (historyPerPage <= 0) return 1;
+  return Math.max(1, Math.ceil(historyTotal / historyPerPage));
+}
+
+async function loadHistoryTable(): Promise<void> {
+  const perPage = historyPerPage;
+  const offset = (historyCurrentPage - 1) * perPage;
+  const url = `/api/history?range=all&limit=${perPage}&offset=${offset}`;
+
+  const data = await fetchJSON<HistoryPageResponse>(url);
+  const rows = data.results;
+  historyTotal = data.total;
+
+  // If current page is beyond last page (e.g. after delete), go to last page and refetch
+  const totalPages = getHistoryPageCount();
+  if (totalPages >= 1 && historyCurrentPage > totalPages) {
+    historyCurrentPage = totalPages;
+    return loadHistoryTable();
+  }
 
   const tbody = $("history-table").querySelector("tbody");
   if (!tbody) return;
@@ -240,6 +265,67 @@ async function loadHistoryTable(): Promise<void> {
         await deleteResult(id);
       }
     });
+  });
+
+  // Update pagination controls
+  updateHistoryPagination();
+}
+
+function updateHistoryPagination(): void {
+  const totalPages = getHistoryPageCount();
+  const pageInfo = $("history-page-info");
+  pageInfo.textContent = `Page ${historyCurrentPage} of ${totalPages}${historyTotal > 0 ? ` (${historyTotal} total)` : ""}`;
+
+  const firstBtn = document.getElementById("history-page-first") as HTMLButtonElement;
+  const prevBtn = document.getElementById("history-page-prev") as HTMLButtonElement;
+  const nextBtn = document.getElementById("history-page-next") as HTMLButtonElement;
+  const lastBtn = document.getElementById("history-page-last") as HTMLButtonElement;
+
+  if (firstBtn) firstBtn.disabled = historyCurrentPage <= 1;
+  if (prevBtn) prevBtn.disabled = historyCurrentPage <= 1;
+  if (nextBtn) nextBtn.disabled = historyCurrentPage >= totalPages || totalPages <= 1;
+  if (lastBtn) lastBtn.disabled = historyCurrentPage >= totalPages || totalPages <= 1;
+}
+
+function setupHistoryPagination(): void {
+  const perPageSelect = document.getElementById("history-per-page") as HTMLSelectElement;
+  const firstBtn = document.getElementById("history-page-first");
+  const prevBtn = document.getElementById("history-page-prev");
+  const nextBtn = document.getElementById("history-page-next");
+  const lastBtn = document.getElementById("history-page-last");
+
+  const savedPerPage = localStorage.getItem("history-per-page");
+  if (savedPerPage && ["50", "100", "200"].includes(savedPerPage)) {
+    historyPerPage = parseInt(savedPerPage, 10);
+    if (perPageSelect) perPageSelect.value = savedPerPage;
+  }
+
+  perPageSelect?.addEventListener("change", () => {
+    historyPerPage = parseInt(perPageSelect.value, 10);
+    localStorage.setItem("history-per-page", perPageSelect.value);
+    historyCurrentPage = 1;
+    loadHistoryTable().catch((err) => console.error("loadHistoryTable", err));
+  });
+
+  firstBtn?.addEventListener("click", () => {
+    historyCurrentPage = 1;
+    loadHistoryTable().catch((err) => console.error("loadHistoryTable", err));
+  });
+  prevBtn?.addEventListener("click", () => {
+    if (historyCurrentPage > 1) {
+      historyCurrentPage--;
+      loadHistoryTable().catch((err) => console.error("loadHistoryTable", err));
+    }
+  });
+  nextBtn?.addEventListener("click", () => {
+    if (historyCurrentPage < getHistoryPageCount()) {
+      historyCurrentPage++;
+      loadHistoryTable().catch((err) => console.error("loadHistoryTable", err));
+    }
+  });
+  lastBtn?.addEventListener("click", () => {
+    historyCurrentPage = getHistoryPageCount();
+    loadHistoryTable().catch((err) => console.error("loadHistoryTable", err));
   });
 }
 
@@ -2332,6 +2418,7 @@ async function init(): Promise<void> {
   setupRunNow();
   setupScheduleForm();
   setupRangeSelectors();
+  setupHistoryPagination();
   setupThemeSelection();
   setupCombinedGraphPreference();
   setupSaveManualRunsPreference();

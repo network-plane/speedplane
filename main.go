@@ -14,11 +14,6 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
-	"syscall"
-	"time"
-
-	"github.com/spf13/cobra"
-
 	"speedplane/api"
 	"speedplane/config"
 	"speedplane/model"
@@ -26,6 +21,10 @@ import (
 	"speedplane/speedtest"
 	"speedplane/storage"
 	"speedplane/theme"
+	"syscall"
+	"time"
+
+	"github.com/spf13/cobra"
 )
 
 //go:embed templates
@@ -40,7 +39,7 @@ var (
 	listen     string
 	listenPort int
 	public     bool
-	appVersion = "1.1.35"
+	appVersion = "1.1.39"
 )
 
 var rootCmd = &cobra.Command{
