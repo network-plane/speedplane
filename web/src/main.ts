@@ -36,6 +36,8 @@ type Schedule = {
   time_of_day?: string;
 };
 
+type RangeKey = "24h" | "7d" | "30d";
+
 function $(id: string): HTMLElement {
   const el = document.getElementById(id);
   if (!el) {
@@ -78,6 +80,54 @@ function formatTime24h(date: Date): string {
 
 function formatDateTime(date: Date): string {
   return `${formatDate(date)} ${formatTime24h(date)}`;
+}
+
+/** X-axis label: 24h = time + date (YYYY-MM-DD) at day change; 7d = YYYY-MM-DD; 30d = YYYY-MM-DD on Mondays only. */
+function formatChartXLabel(
+  date: Date,
+  range: RangeKey,
+  previousLabelDate: Date | null
+): string {
+  if (range === "24h") {
+    const showDate = !previousLabelDate || date.getDate() !== previousLabelDate.getDate() || date.getMonth() !== previousLabelDate.getMonth();
+    if (showDate) return `${formatDate(date)} ${formatTime24h(date)}`;
+    return formatTime24h(date);
+  }
+  if (range === "7d") return formatDate(date);
+  if (range === "30d") return date.getDay() === 1 ? formatDate(date) : "";
+  return formatTime24h(date);
+}
+
+const CHART_TOOLTIP_CLASS = "chart-tooltip";
+let sharedChartTooltip: HTMLElement | null = null;
+
+function getOrCreateChartTooltip(): HTMLElement {
+  if (sharedChartTooltip && sharedChartTooltip.parentNode) {
+    sharedChartTooltip.style.display = "none";
+    return sharedChartTooltip;
+  }
+  sharedChartTooltip = document.createElement("div");
+  sharedChartTooltip.className = CHART_TOOLTIP_CLASS;
+  sharedChartTooltip.style.cssText = `
+    position: fixed;
+    background: rgba(26, 26, 26, 0.95);
+    border: 1px solid var(--border, rgba(255,140,0,.25));
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--txt, #E8E8E8);
+    pointer-events: none;
+    z-index: 10000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    display: none;
+    white-space: nowrap;
+  `;
+  document.body.appendChild(sharedChartTooltip);
+  return sharedChartTooltip;
+}
+
+function hideChartTooltip(): void {
+  if (sharedChartTooltip) sharedChartTooltip.style.display = "none";
 }
 
 /* ---------- SUMMARY CARDS ---------- */
@@ -372,9 +422,6 @@ async function deleteResult(id: string): Promise<void> {
 
 /* ---------- SIMPLE SVG LINE CHARTS ---------- */
 
-type RangeKey = "24h" | "7d" | "30d";
-
-
 async function loadHistoryForRange(range: RangeKey): Promise<SpeedtestResult[]> {
   const url = "/api/history?range=" + encodeURIComponent(range);
   return await fetchJSON<SpeedtestResult[]>(url);
@@ -407,15 +454,143 @@ async function loadChartData(
   return await fetchJSON<ChartDataResponse>(url);
 }
 
+// Pan state for draggable charts: offset 0..1, windowFraction (e.g. 0.4 = show 40% of data)
+type ChartPanState = { offset: number; windowFraction: number };
+const MIN_POINTS_FOR_PAN = 10;
+const DEFAULT_PAN_WINDOW_FRACTION = 0.4;
+
+let chartPanState: ChartPanState = { offset: 0, windowFraction: DEFAULT_PAN_WINDOW_FRACTION };
+/** Cached full data per range so pan can re-render each chart with its own range. */
+const chartFullDataByRange: Partial<Record<RangeKey, SpeedtestResult[]>> = {};
+let chartLastRange: RangeKey | null = null;
+
+function getChartPanOpts(range: RangeKey): { range: RangeKey; pan: ChartPanState; onPanChange: () => void } {
+  if (range !== chartLastRange) {
+    chartPanState.offset = 0;
+    chartLastRange = range;
+  }
+  return { range, pan: chartPanState, onPanChange: refreshDashboardCharts };
+}
+
+function sliceRowsForPan(
+  rows: SpeedtestResult[],
+  pan: ChartPanState
+): SpeedtestResult[] {
+  if (rows.length <= MIN_POINTS_FOR_PAN) return rows;
+  const visibleCount = Math.max(
+    1,
+    Math.min(rows.length, Math.ceil(rows.length * pan.windowFraction))
+  );
+  const maxStart = Math.max(0, rows.length - visibleCount);
+  const startIndex = Math.min(
+    maxStart,
+    Math.round(pan.offset * maxStart)
+  );
+  return rows.slice(startIndex, startIndex + visibleCount);
+}
+
+function refreshDashboardCharts(): void {
+  const isCombined = localStorage.getItem("combined-graph") === "true";
+  const panOptsBase = { pan: chartPanState, onPanChange: refreshDashboardCharts, skipPanSetup: true };
+  if (isCombined) {
+    const range = (($("range-combined") as HTMLSelectElement)?.value || "24h") as RangeKey;
+    const rows = chartFullDataByRange[range];
+    if (rows) {
+      renderCombinedChart("combined-chart", rows, range, { ...panOptsBase, range });
+    }
+  } else {
+    const charts: { id: string; key: "download_mbps" | "upload_mbps" | "ping_ms" | "jitter_ms"; rangeSelectId: string; toggleId: string; metric: "download" | "upload" | "ping" | "jitter" }[] = [
+      { id: "download-chart", key: "download_mbps", rangeSelectId: "range-download", toggleId: "chart-type-download", metric: "download" },
+      { id: "upload-chart", key: "upload_mbps", rangeSelectId: "range-upload", toggleId: "chart-type-upload", metric: "upload" },
+      { id: "latency-chart", key: "ping_ms", rangeSelectId: "range-latency", toggleId: "chart-type-latency", metric: "ping" },
+      { id: "jitter-chart", key: "jitter_ms", rangeSelectId: "range-jitter", toggleId: "chart-type-jitter", metric: "jitter" },
+    ];
+    for (const c of charts) {
+      const range = (document.getElementById(c.rangeSelectId) as HTMLSelectElement)?.value as RangeKey | undefined;
+      if (!range) continue;
+      const toggle = document.getElementById(c.toggleId);
+      const isPercentile = toggle?.classList.contains("active");
+      if (isPercentile) {
+        renderPercentileChart(c.id, range, c.metric).catch((err) => console.error("renderPercentileChart", err));
+      } else {
+        const rows = range ? chartFullDataByRange[range] : undefined;
+        if (rows) {
+          renderLineChart(c.id, rows, c.key, { ...panOptsBase, range });
+        }
+      }
+    }
+  }
+}
+
+function setupChartPan(
+  container: HTMLElement,
+  onPanChange: () => void
+): void {
+  const prevController = (container as HTMLElement & { __panAbort?: AbortController }).__panAbort;
+  if (prevController) prevController.abort();
+  const controller = new AbortController();
+  (container as HTMLElement & { __panAbort?: AbortController }).__panAbort = controller;
+  const { signal } = controller;
+
+  let dragging = false;
+  let startClientX = 0;
+  let startOffset = 0;
+
+  const onMouseDown = (e: MouseEvent): void => {
+    if (e.button !== 0) return;
+    hideChartTooltip();
+    dragging = true;
+    startClientX = e.clientX;
+    startOffset = chartPanState.offset;
+    container.style.cursor = "grabbing";
+    e.preventDefault();
+  };
+
+  const onMouseMove = (e: MouseEvent): void => {
+    if (!dragging) return;
+    const chartWidth = container.clientWidth || 300;
+    const deltaX = e.clientX - startClientX;
+    const offsetDelta = deltaX / chartWidth;
+    chartPanState.offset = Math.max(
+      0,
+      Math.min(1, startOffset + offsetDelta)
+    );
+    startClientX = e.clientX;
+    startOffset = chartPanState.offset;
+    onPanChange();
+  };
+
+  const onMouseUp = (): void => {
+    if (!dragging) return;
+    dragging = false;
+    container.style.cursor = "grab";
+  };
+
+  container.addEventListener("mousedown", onMouseDown as EventListener, { signal });
+  container.addEventListener("mouseenter", () => { if (!dragging) container.style.cursor = "grab"; }, { signal });
+  container.addEventListener("mouseleave", () => { container.style.cursor = ""; onMouseUp(); }, { signal });
+  document.addEventListener("mousemove", onMouseMove, { signal });
+  document.addEventListener("mouseup", onMouseUp, { signal });
+  container.style.cursor = "grab";
+  container.title = "Drag to pan";
+}
+
 function renderLineChart(
   containerId: string,
   rows: SpeedtestResult[],
   key: "download_mbps" | "upload_mbps" | "ping_ms" | "jitter_ms",
+  options?: { range?: RangeKey; pan?: ChartPanState; onPanChange?: () => void; skipPanSetup?: boolean },
 ): void {
   const container = $(containerId);
   container.innerHTML = "";
 
-  if (!rows.length) {
+  const pan = options?.pan;
+  const usePan = pan && rows.length >= MIN_POINTS_FOR_PAN && options?.onPanChange && !options?.skipPanSetup;
+  const usePanSlice = pan && rows.length >= MIN_POINTS_FOR_PAN && options?.onPanChange;
+  const drawRows = usePanSlice ? sliceRowsForPan(rows, pan!) : rows;
+  const range = options?.range ?? "24h";
+
+  if (!drawRows.length) {
     container.textContent = "No data for selected range.";
     return;
   }
@@ -435,8 +610,8 @@ function renderLineChart(
   svg.style.width = "100%";
   svg.style.height = "100%";
 
-  const times = rows.map((r) => new Date(r.timestamp).getTime());
-  const values = rows.map((r) => {
+  const times = drawRows.map((r) => new Date(r.timestamp).getTime());
+  const values = drawRows.map((r) => {
     const val = (r as any)[key] as number;
     // Handle optional fields that might be undefined
     if (key === "jitter_ms") {
@@ -464,23 +639,7 @@ function renderLineChart(
   const innerW = width - paddingX * 2;
   const innerH = height - paddingY - paddingBottom;
 
-  // Create tooltip element (before drawing elements that need it)
-  const tooltip = document.createElement("div");
-  tooltip.style.cssText = `
-    position: fixed;
-    background: rgba(26, 26, 26, 0.95);
-    border: 1px solid var(--border, rgba(255,140,0,.25));
-    border-radius: 4px;
-    padding: 6px 10px;
-    font-size: 11px;
-    color: var(--txt, #E8E8E8);
-    pointer-events: none;
-    z-index: 10000;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    display: none;
-    white-space: nowrap;
-  `;
-  document.body.appendChild(tooltip);
+  const tooltip = getOrCreateChartTooltip();
 
   // Helper to get metric name and unit
   const getMetricInfo = (k: string): { name: string; unit: string } => {
@@ -526,7 +685,7 @@ function renderLineChart(
   }
 
   // Draw vertical lines for each test (dimmer)
-  const coords = rows.map((r) => {
+  const coords = drawRows.map((r) => {
     const t = new Date(r.timestamp).getTime();
     const xNorm = maxX === minX ? 0 : (t - minX) / (maxX - minX);
     const v = (r as any)[key] as number;
@@ -575,7 +734,7 @@ function renderLineChart(
       tooltip.innerHTML = `
         <div style="font-weight: 600; margin-bottom: 2px;">Average ${metricInfo.name}</div>
         <div>${formatNumber(avgValue, 2)} ${metricInfo.unit}</div>
-        <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">Based on ${rows.length} measurement${rows.length !== 1 ? "s" : ""}</div>
+        <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">Based on ${drawRows.length} measurement${drawRows.length !== 1 ? "s" : ""}</div>
       `;
       tooltip.style.display = "block";
 
@@ -616,7 +775,7 @@ function renderLineChart(
     circle.style.cursor = "pointer";
 
     // Add hover events for tooltip
-    const row = rows[index];
+    const row = drawRows[index];
     const value = values[index];
     const date = new Date(row.timestamp);
 
@@ -660,27 +819,76 @@ function renderLineChart(
     svg.appendChild(circle);
   });
 
-  // Add x-axis labels (time/date) - always use 24h format and YYYY-MM-DD
-  const labelCount = Math.min(rows.length, 6); // Max 6 labels
-  const labelStep = Math.max(1, Math.floor(rows.length / labelCount));
-  for (let i = 0; i < rows.length; i += labelStep) {
-    if (i >= coords.length) break;
-    const coord = coords[i];
-    const date = new Date(rows[i].timestamp);
-    // Always show date in YYYY-MM-DD format and time in 24h format
-    const timeStr = `${formatTime24h(date)}`;
-
-    const text = document.createElementNS(svgNS, "text");
-    text.setAttribute("x", coord.x.toString());
-    text.setAttribute("y", (height - paddingBottom + 8).toString());
-    text.setAttribute("text-anchor", "middle");
-    text.setAttribute("fill", "rgba(255,255,255,0.4)");
-    text.setAttribute("font-size", "2.5");
-    text.textContent = timeStr;
-    svg.appendChild(text);
+  // Add x-axis labels by range: 24h = time + date at day change; 7d = YYYY-MM-DD; 30d = YYYY-MM-DD on Mondays only. Draw a tick above each label so it's clear which block the date refers to.
+  const tickY1 = height - paddingBottom;
+  const tickY2 = height - paddingBottom + 4;
+  const labelY = height - paddingBottom + 8;
+  let previousLabelDate: Date | null = null;
+  if (range === "30d") {
+    const minDate = new Date(minX);
+    let monday = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate(), 0, 0, 0, 0);
+    const startDay = monday.getDay();
+    const daysToMonday = startDay === 0 ? 1 : startDay === 1 ? 0 : 8 - startDay;
+    monday.setDate(monday.getDate() + daysToMonday);
+    while (monday.getTime() <= maxX) {
+      const xNorm = (monday.getTime() - minX) / (maxX - minX);
+      if (xNorm >= 0 && xNorm <= 1) {
+        const x = paddingX + xNorm * innerW;
+        const label = formatChartXLabel(monday, range, null);
+        if (label) {
+          const tick = document.createElementNS(svgNS, "line");
+          tick.setAttribute("x1", x.toString());
+          tick.setAttribute("y1", tickY1.toString());
+          tick.setAttribute("x2", x.toString());
+          tick.setAttribute("y2", tickY2.toString());
+          tick.setAttribute("stroke", "rgba(255,255,255,0.4)");
+          tick.setAttribute("stroke-width", "0.4");
+          svg.appendChild(tick);
+          const text = document.createElementNS(svgNS, "text");
+          text.setAttribute("x", x.toString());
+          text.setAttribute("y", labelY.toString());
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("fill", "rgba(255,255,255,0.4)");
+          text.setAttribute("font-size", "2.5");
+          text.textContent = label;
+          svg.appendChild(text);
+        }
+      }
+      monday.setDate(monday.getDate() + 7);
+    }
+  } else {
+    const labelCount = range === "24h" ? Math.min(drawRows.length, 6) : Math.min(drawRows.length, 7);
+    const labelStep = Math.max(1, Math.floor(drawRows.length / labelCount));
+    for (let i = 0; i < drawRows.length; i += labelStep) {
+      if (i >= coords.length) break;
+      const coord = coords[i];
+      const date = new Date(drawRows[i].timestamp);
+      const timeStr = formatChartXLabel(date, range, previousLabelDate);
+      if (range === "24h" || range === "7d") previousLabelDate = date;
+      const tick = document.createElementNS(svgNS, "line");
+      tick.setAttribute("x1", coord.x.toString());
+      tick.setAttribute("y1", tickY1.toString());
+      tick.setAttribute("x2", coord.x.toString());
+      tick.setAttribute("y2", tickY2.toString());
+      tick.setAttribute("stroke", "rgba(255,255,255,0.4)");
+      tick.setAttribute("stroke-width", "0.4");
+      svg.appendChild(tick);
+      const text = document.createElementNS(svgNS, "text");
+      text.setAttribute("x", coord.x.toString());
+      text.setAttribute("y", labelY.toString());
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("fill", "rgba(255,255,255,0.4)");
+      text.setAttribute("font-size", "2.5");
+      text.textContent = timeStr;
+      svg.appendChild(text);
+    }
   }
 
   container.appendChild(svg);
+
+  if (usePan && options?.onPanChange) {
+    setupChartPan(container, options.onPanChange);
+  }
 }
 
 
@@ -690,7 +898,11 @@ async function renderPercentileChart(
   metric: "download" | "upload" | "ping" | "jitter",
 ): Promise<void> {
   const container = $(containerId);
+  const prevPan = (container as HTMLElement & { __panAbort?: AbortController }).__panAbort;
+  if (prevPan) prevPan.abort();
   container.innerHTML = "";
+  container.title = "";
+  container.style.cursor = "";
 
   const chartData = await loadChartData(range, metric);
   const rows = chartData.data;
@@ -848,7 +1060,8 @@ async function updateDownloadChart(): Promise<void> {
     await renderPercentileChart("download-chart", value, "download");
   } else {
     const rows = await loadHistoryForRange(value);
-    renderLineChart("download-chart", rows, "download_mbps");
+    chartFullDataByRange[value] = rows;
+    renderLineChart("download-chart", rows, "download_mbps", getChartPanOpts(value));
   }
 }
 
@@ -860,7 +1073,8 @@ async function updateUploadChart(): Promise<void> {
     await renderPercentileChart("upload-chart", value, "upload");
   } else {
     const rows = await loadHistoryForRange(value);
-    renderLineChart("upload-chart", rows, "upload_mbps");
+    chartFullDataByRange[value] = rows;
+    renderLineChart("upload-chart", rows, "upload_mbps", getChartPanOpts(value));
   }
 }
 
@@ -872,7 +1086,8 @@ async function updateLatencyChart(): Promise<void> {
     await renderPercentileChart("latency-chart", value, "ping");
   } else {
     const rows = await loadHistoryForRange(value);
-    renderLineChart("latency-chart", rows, "ping_ms");
+    chartFullDataByRange[value] = rows;
+    renderLineChart("latency-chart", rows, "ping_ms", getChartPanOpts(value));
   }
 }
 
@@ -884,18 +1099,27 @@ async function updateJitterChart(): Promise<void> {
     await renderPercentileChart("jitter-chart", value, "jitter");
   } else {
     const rows = await loadHistoryForRange(value);
-    renderLineChart("jitter-chart", rows, "jitter_ms");
+    chartFullDataByRange[value] = rows;
+    renderLineChart("jitter-chart", rows, "jitter_ms", getChartPanOpts(value));
   }
 }
 
 function renderCombinedChart(
   containerId: string,
   rows: SpeedtestResult[],
+  range?: RangeKey,
+  options?: { range?: RangeKey; pan?: ChartPanState; onPanChange?: () => void; skipPanSetup?: boolean },
 ): void {
   const container = $(containerId);
   container.innerHTML = "";
 
-  if (!rows.length) {
+  const pan = options?.pan;
+  const usePan = pan && rows.length >= MIN_POINTS_FOR_PAN && options?.onPanChange && !options?.skipPanSetup;
+  const usePanSlice = pan && rows.length >= MIN_POINTS_FOR_PAN && options?.onPanChange;
+  const drawRows = usePanSlice ? sliceRowsForPan(rows, pan!) : rows;
+  const chartRange = options?.range ?? range ?? "24h";
+
+  if (!drawRows.length) {
     container.textContent = "No data for selected range.";
     return;
   }
@@ -916,11 +1140,11 @@ function renderCombinedChart(
   svg.style.width = "100%";
   svg.style.height = "100%";
 
-  const times = rows.map((r) => new Date(r.timestamp).getTime());
-  const downloadValues = rows.map((r) => r.download_mbps);
-  const uploadValues = rows.map((r) => r.upload_mbps);
-  const pingValues = rows.map((r) => r.ping_ms);
-  const jitterValues = rows.map((r) => r.jitter_ms ?? 0);
+  const times = drawRows.map((r) => new Date(r.timestamp).getTime());
+  const downloadValues = drawRows.map((r) => r.download_mbps);
+  const uploadValues = drawRows.map((r) => r.upload_mbps);
+  const pingValues = drawRows.map((r) => r.ping_ms);
+  const jitterValues = drawRows.map((r) => r.jitter_ms ?? 0);
 
   const minX = Math.min(...times);
   const maxX = Math.max(...times);
@@ -964,23 +1188,7 @@ function renderCombinedChart(
   const innerW = width - paddingLeft - paddingRight;
   const innerH = height - paddingTop - paddingBottom;
 
-  // Create tooltip
-  const tooltip = document.createElement("div");
-  tooltip.style.cssText = `
-    position: fixed;
-    background: rgba(26, 26, 26, 0.95);
-    border: 1px solid var(--border, rgba(255,140,0,.25));
-    border-radius: 4px;
-    padding: 6px 10px;
-    font-size: 11px;
-    color: var(--txt, #E8E8E8);
-    pointer-events: none;
-    z-index: 10000;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    display: none;
-    white-space: nowrap;
-  `;
-  document.body.appendChild(tooltip);
+  const tooltip = getOrCreateChartTooltip();
 
   // Draw grid lines (horizontal)
   const gridLines = 4;
@@ -1062,22 +1270,71 @@ function renderCombinedChart(
     }
   }
 
-  // Draw X-axis labels (time)
-  const xLabelPositions = [0, Math.floor(times.length / 2), times.length - 1];
-  xLabelPositions.forEach((idx) => {
-    if (idx < 0 || idx >= times.length) return;
-    const xNorm = (times[idx] - minX) / (maxX - minX);
-    const x = paddingLeft + xNorm * innerW;
-    const date = new Date(times[idx]);
-    const text = document.createElementNS(svgNS, "text");
-    text.setAttribute("x", x.toString());
-    text.setAttribute("y", (height - paddingBottom + 6).toString());
-    text.setAttribute("text-anchor", "middle");
-    text.setAttribute("fill", "rgba(255,255,255,0.5)");
-    text.setAttribute("font-size", "2.2");
-    text.textContent = formatTime24h(date);
-    svg.appendChild(text);
-  });
+  // Draw X-axis labels by range with tick marks so it's clear which block each date refers to
+  const combTickY1 = height - paddingBottom;
+  const combTickY2 = height - paddingBottom + 4;
+  const combLabelY = height - paddingBottom + 6;
+  let prevLabelDate: Date | null = null;
+  if (chartRange === "30d") {
+    const minDate = new Date(minX);
+    let monday = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate(), 0, 0, 0, 0);
+    const startDay = monday.getDay();
+    const daysToMonday = startDay === 0 ? 1 : startDay === 1 ? 0 : 8 - startDay;
+    monday.setDate(monday.getDate() + daysToMonday);
+    while (monday.getTime() <= maxX) {
+      const xNorm = (monday.getTime() - minX) / (maxX - minX);
+      if (xNorm >= 0 && xNorm <= 1) {
+        const x = paddingLeft + xNorm * innerW;
+        const label = formatChartXLabel(monday, chartRange, null);
+        if (label) {
+          const tick = document.createElementNS(svgNS, "line");
+          tick.setAttribute("x1", x.toString());
+          tick.setAttribute("y1", combTickY1.toString());
+          tick.setAttribute("x2", x.toString());
+          tick.setAttribute("y2", combTickY2.toString());
+          tick.setAttribute("stroke", "rgba(255,255,255,0.5)");
+          tick.setAttribute("stroke-width", "0.4");
+          svg.appendChild(tick);
+          const text = document.createElementNS(svgNS, "text");
+          text.setAttribute("x", x.toString());
+          text.setAttribute("y", combLabelY.toString());
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("fill", "rgba(255,255,255,0.5)");
+          text.setAttribute("font-size", "2.2");
+          text.textContent = label;
+          svg.appendChild(text);
+        }
+      }
+      monday.setDate(monday.getDate() + 7);
+    }
+  } else {
+    const labelCount = chartRange === "24h" ? 6 : 7;
+    const step = Math.max(1, Math.floor(times.length / labelCount));
+    for (let idx = 0; idx < times.length; idx += step) {
+      if (idx >= times.length) break;
+      const xNorm = (times[idx] - minX) / (maxX - minX);
+      const x = paddingLeft + xNorm * innerW;
+      const date = new Date(times[idx]);
+      const label = formatChartXLabel(date, chartRange, prevLabelDate);
+      if (chartRange === "24h" || chartRange === "7d") prevLabelDate = date;
+      const tick = document.createElementNS(svgNS, "line");
+      tick.setAttribute("x1", x.toString());
+      tick.setAttribute("y1", combTickY1.toString());
+      tick.setAttribute("x2", x.toString());
+      tick.setAttribute("y2", combTickY2.toString());
+      tick.setAttribute("stroke", "rgba(255,255,255,0.5)");
+      tick.setAttribute("stroke-width", "0.4");
+      svg.appendChild(tick);
+      const text = document.createElementNS(svgNS, "text");
+      text.setAttribute("x", x.toString());
+      text.setAttribute("y", combLabelY.toString());
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("fill", "rgba(255,255,255,0.5)");
+      text.setAttribute("font-size", "2.2");
+      text.textContent = label;
+      svg.appendChild(text);
+    }
+  }
 
   // Calculate overall range for positioning (used in both modes)
   let overallMin: number, overallMax: number, overallRange: number;
@@ -1164,7 +1421,7 @@ function renderCombinedChart(
         tooltip.innerHTML = `
           <div style="font-weight: 600; margin-bottom: 2px;">Average ${metric.name}</div>
           <div>${formatNumber(avgValue, 2)} ${metric.unit}</div>
-          <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">Based on ${rows.length} measurement${rows.length !== 1 ? "s" : ""}</div>
+          <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">Based on ${drawRows.length} measurement${drawRows.length !== 1 ? "s" : ""}</div>
         `;
         tooltip.style.display = "block";
         const tooltipRect = tooltip.getBoundingClientRect();
@@ -1203,7 +1460,7 @@ function renderCombinedChart(
       circle.setAttribute("fill", metric.color);
       circle.style.cursor = "pointer";
 
-      const row = rows[index];
+      const row = drawRows[index];
       const value = metric.values[index];
       const date = new Date(row.timestamp);
 
@@ -1267,6 +1524,10 @@ function renderCombinedChart(
   });
 
   container.appendChild(svg);
+
+  if (usePan && options?.onPanChange) {
+    setupChartPan(container, options.onPanChange);
+  }
 }
 
 async function updateCombinedChart(): Promise<void> {
@@ -1275,7 +1536,8 @@ async function updateCombinedChart(): Promise<void> {
   // Save the range preference
   localStorage.setItem("chart-range-combined", value);
   const rows = await loadHistoryForRange(value);
-  renderCombinedChart("combined-chart", rows);
+  chartFullDataByRange[value] = rows;
+  renderCombinedChart("combined-chart", rows, value, getChartPanOpts(value));
 }
 
 /* ---------- SCHEDULES ---------- */
