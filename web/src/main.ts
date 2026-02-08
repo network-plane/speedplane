@@ -36,6 +36,8 @@ type Schedule = {
   time_of_day?: string;
 };
 
+type RangeKey = "24h" | "7d" | "30d";
+
 function $(id: string): HTMLElement {
   const el = document.getElementById(id);
   if (!el) {
@@ -78,6 +80,34 @@ function formatTime24h(date: Date): string {
 
 function formatDateTime(date: Date): string {
   return `${formatDate(date)} ${formatTime24h(date)}`;
+}
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatShortDate(date: Date): string {
+  return `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`;
+}
+
+/** X-axis label for charts: 24h = time with date at day change (at best 2 dates); 7d = short date; 30d = short date on Mondays only. */
+function formatChartXLabel(
+  date: Date,
+  range: RangeKey,
+  previousLabelDate: Date | null
+): string {
+  if (range === "24h") {
+    const prev = previousLabelDate;
+    const showDate = !prev || date.getDate() !== prev.getDate() || date.getMonth() !== prev.getMonth();
+    if (showDate) return `${formatShortDate(date)} ${formatTime24h(date)}`;
+    return formatTime24h(date);
+  }
+  if (range === "7d") {
+    return formatShortDate(date);
+  }
+  if (range === "30d") {
+    if (date.getDay() === 1) return formatShortDate(date); // Monday
+    return "";
+  }
+  return formatTime24h(date);
 }
 
 /* ---------- SUMMARY CARDS ---------- */
@@ -372,9 +402,6 @@ async function deleteResult(id: string): Promise<void> {
 
 /* ---------- SIMPLE SVG LINE CHARTS ---------- */
 
-type RangeKey = "24h" | "7d" | "30d";
-
-
 async function loadHistoryForRange(range: RangeKey): Promise<SpeedtestResult[]> {
   const url = "/api/history?range=" + encodeURIComponent(range);
   return await fetchJSON<SpeedtestResult[]>(url);
@@ -411,6 +438,7 @@ function renderLineChart(
   containerId: string,
   rows: SpeedtestResult[],
   key: "download_mbps" | "upload_mbps" | "ping_ms" | "jitter_ms",
+  range: RangeKey,
 ): void {
   const container = $(containerId);
   container.innerHTML = "";
@@ -660,24 +688,52 @@ function renderLineChart(
     svg.appendChild(circle);
   });
 
-  // Add x-axis labels (time/date) - always use 24h format and YYYY-MM-DD
-  const labelCount = Math.min(rows.length, 6); // Max 6 labels
-  const labelStep = Math.max(1, Math.floor(rows.length / labelCount));
-  for (let i = 0; i < rows.length; i += labelStep) {
-    if (i >= coords.length) break;
-    const coord = coords[i];
-    const date = new Date(rows[i].timestamp);
-    // Always show date in YYYY-MM-DD format and time in 24h format
-    const timeStr = `${formatTime24h(date)}`;
+  // Add x-axis labels (time/date) by range: 24h = time + date at day change; 7d = short date; 30d = short date on Mondays only
+  let previousLabelDate: Date | null = null;
+  if (range === "30d") {
+    // Only label on Mondays: find all Mondays in [minX, maxX]
+    const minDate = new Date(minX);
+    let monday = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate(), 0, 0, 0, 0);
+    const startDay = monday.getDay();
+    const daysToMonday = startDay === 0 ? 1 : startDay === 1 ? 0 : 8 - startDay;
+    monday.setDate(monday.getDate() + daysToMonday);
+    while (monday.getTime() <= maxX) {
+      const xNorm = (monday.getTime() - minX) / (maxX - minX);
+      if (xNorm >= 0 && xNorm <= 1) {
+        const x = paddingX + xNorm * innerW;
+        const label = formatChartXLabel(monday, range, null);
+        if (label) {
+          const text = document.createElementNS(svgNS, "text");
+          text.setAttribute("x", x.toString());
+          text.setAttribute("y", (height - paddingBottom + 8).toString());
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("fill", "rgba(255,255,255,0.4)");
+          text.setAttribute("font-size", "2.5");
+          text.textContent = label;
+          svg.appendChild(text);
+        }
+      }
+      monday.setDate(monday.getDate() + 7);
+    }
+  } else {
+    const labelCount = range === "24h" ? Math.min(rows.length, 6) : Math.min(rows.length, 7);
+    const labelStep = Math.max(1, Math.floor(rows.length / labelCount));
+    for (let i = 0; i < rows.length; i += labelStep) {
+      if (i >= coords.length) break;
+      const coord = coords[i];
+      const date = new Date(rows[i].timestamp);
+      const timeStr = formatChartXLabel(date, range, previousLabelDate);
+      if (range === "24h" || range === "7d") previousLabelDate = date;
 
-    const text = document.createElementNS(svgNS, "text");
-    text.setAttribute("x", coord.x.toString());
-    text.setAttribute("y", (height - paddingBottom + 8).toString());
-    text.setAttribute("text-anchor", "middle");
-    text.setAttribute("fill", "rgba(255,255,255,0.4)");
-    text.setAttribute("font-size", "2.5");
-    text.textContent = timeStr;
-    svg.appendChild(text);
+      const text = document.createElementNS(svgNS, "text");
+      text.setAttribute("x", coord.x.toString());
+      text.setAttribute("y", (height - paddingBottom + 8).toString());
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("fill", "rgba(255,255,255,0.4)");
+      text.setAttribute("font-size", "2.5");
+      text.textContent = timeStr;
+      svg.appendChild(text);
+    }
   }
 
   container.appendChild(svg);
@@ -848,7 +904,7 @@ async function updateDownloadChart(): Promise<void> {
     await renderPercentileChart("download-chart", value, "download");
   } else {
     const rows = await loadHistoryForRange(value);
-    renderLineChart("download-chart", rows, "download_mbps");
+    renderLineChart("download-chart", rows, "download_mbps", value);
   }
 }
 
@@ -860,7 +916,7 @@ async function updateUploadChart(): Promise<void> {
     await renderPercentileChart("upload-chart", value, "upload");
   } else {
     const rows = await loadHistoryForRange(value);
-    renderLineChart("upload-chart", rows, "upload_mbps");
+    renderLineChart("upload-chart", rows, "upload_mbps", value);
   }
 }
 
@@ -872,7 +928,7 @@ async function updateLatencyChart(): Promise<void> {
     await renderPercentileChart("latency-chart", value, "ping");
   } else {
     const rows = await loadHistoryForRange(value);
-    renderLineChart("latency-chart", rows, "ping_ms");
+    renderLineChart("latency-chart", rows, "ping_ms", value);
   }
 }
 
@@ -884,13 +940,14 @@ async function updateJitterChart(): Promise<void> {
     await renderPercentileChart("jitter-chart", value, "jitter");
   } else {
     const rows = await loadHistoryForRange(value);
-    renderLineChart("jitter-chart", rows, "jitter_ms");
+    renderLineChart("jitter-chart", rows, "jitter_ms", value);
   }
 }
 
 function renderCombinedChart(
   containerId: string,
   rows: SpeedtestResult[],
+  range: RangeKey,
 ): void {
   const container = $(containerId);
   container.innerHTML = "";
@@ -1062,22 +1119,52 @@ function renderCombinedChart(
     }
   }
 
-  // Draw X-axis labels (time)
-  const xLabelPositions = [0, Math.floor(times.length / 2), times.length - 1];
-  xLabelPositions.forEach((idx) => {
-    if (idx < 0 || idx >= times.length) return;
-    const xNorm = (times[idx] - minX) / (maxX - minX);
-    const x = paddingLeft + xNorm * innerW;
-    const date = new Date(times[idx]);
-    const text = document.createElementNS(svgNS, "text");
-    text.setAttribute("x", x.toString());
-    text.setAttribute("y", (height - paddingBottom + 6).toString());
-    text.setAttribute("text-anchor", "middle");
-    text.setAttribute("fill", "rgba(255,255,255,0.5)");
-    text.setAttribute("font-size", "2.2");
-    text.textContent = formatTime24h(date);
-    svg.appendChild(text);
-  });
+  // Draw X-axis labels (time/date by range: 24h = time + date at day change; 7d = short date; 30d = Mondays only)
+  let prevLabelDate: Date | null = null;
+  if (range === "30d") {
+    const minDate = new Date(minX);
+    let monday = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate(), 0, 0, 0, 0);
+    const startDay = monday.getDay();
+    const daysToMonday = startDay === 0 ? 1 : startDay === 1 ? 0 : 8 - startDay;
+    monday.setDate(monday.getDate() + daysToMonday);
+    while (monday.getTime() <= maxX) {
+      const xNorm = (monday.getTime() - minX) / (maxX - minX);
+      if (xNorm >= 0 && xNorm <= 1) {
+        const x = paddingLeft + xNorm * innerW;
+        const label = formatChartXLabel(monday, range, null);
+        if (label) {
+          const text = document.createElementNS(svgNS, "text");
+          text.setAttribute("x", x.toString());
+          text.setAttribute("y", (height - paddingBottom + 6).toString());
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("fill", "rgba(255,255,255,0.5)");
+          text.setAttribute("font-size", "2.2");
+          text.textContent = label;
+          svg.appendChild(text);
+        }
+      }
+      monday.setDate(monday.getDate() + 7);
+    }
+  } else {
+    const labelCount = range === "24h" ? 6 : 7;
+    const step = Math.max(1, Math.floor(times.length / labelCount));
+    for (let idx = 0; idx < times.length; idx += step) {
+      if (idx >= times.length) break;
+      const xNorm = (times[idx] - minX) / (maxX - minX);
+      const x = paddingLeft + xNorm * innerW;
+      const date = new Date(times[idx]);
+      const label = formatChartXLabel(date, range, prevLabelDate);
+      if (range === "24h" || range === "7d") prevLabelDate = date;
+      const text = document.createElementNS(svgNS, "text");
+      text.setAttribute("x", x.toString());
+      text.setAttribute("y", (height - paddingBottom + 6).toString());
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("fill", "rgba(255,255,255,0.5)");
+      text.setAttribute("font-size", "2.2");
+      text.textContent = label;
+      svg.appendChild(text);
+    }
+  }
 
   // Calculate overall range for positioning (used in both modes)
   let overallMin: number, overallMax: number, overallRange: number;
@@ -1275,7 +1362,7 @@ async function updateCombinedChart(): Promise<void> {
   // Save the range preference
   localStorage.setItem("chart-range-combined", value);
   const rows = await loadHistoryForRange(value);
-  renderCombinedChart("combined-chart", rows);
+  renderCombinedChart("combined-chart", rows, value);
 }
 
 /* ---------- SCHEDULES ---------- */
