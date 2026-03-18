@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	planews "github.com/network-plane/planeweb-go/ws"
 
 	"speedplane/model"
 	"speedplane/scheduler"
@@ -85,7 +86,7 @@ type Server struct {
 	saveConfig   func()
 	getSaveManualRuns func() bool
 	setSaveManualRuns func(bool) error
-	wsManager    *WSConnectionManager
+	wsManager    *planews.Manager
 }
 
 // runManual executes a speedtest for manual runs. Results are never saved automatically.
@@ -109,7 +110,7 @@ func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithPro
 		saveConfig:     saveConfig,
 		getSaveManualRuns: getSaveManualRuns,
 		setSaveManualRuns: setSaveManualRuns,
-		wsManager:      NewWSConnectionManager(),
+		wsManager:      planews.NewManager(),
 	}
 }
 

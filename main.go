@@ -7,7 +7,6 @@ import (
 	"html/template"
 	"io/fs"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	planeweblisten "github.com/network-plane/planeweb-go/listen"
 	"github.com/spf13/cobra"
 )
 
@@ -285,8 +285,7 @@ func run(cmd *cobra.Command, args []string) {
 		Handler: mux,
 	}
 
-	// Print listening addresses
-	printListeningAddresses(cfg.ListenAddr)
+	planeweblisten.LogURLs("speedplane", "http", cfg.ListenAddr)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -451,36 +450,6 @@ WantedBy=multi-user.target
 		fmt.Printf("Service file deployed successfully!\n")
 		fmt.Printf("You can now start the service with: sudo systemctl start speedplane\n")
 		fmt.Printf("Enable it to start on boot with: sudo systemctl enable speedplane\n")
-	}
-}
-
-func printListeningAddresses(addr string) {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		log.Printf("listening on http://%s", addr)
-		return
-	}
-
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		// Listening on all interfaces
-		addrs, err := net.InterfaceAddrs()
-		if err == nil {
-			log.Println("listening on:")
-			for _, a := range addrs {
-				if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-					if ipnet.IP.To4() != nil {
-						log.Printf("  http://%s:%s", ipnet.IP.String(), port)
-					}
-				}
-			}
-			// Also show localhost
-			log.Printf("  http://localhost:%s", port)
-			log.Printf("  http://127.0.0.1:%s", port)
-		} else {
-			log.Printf("listening on http://0.0.0.0:%s", port)
-		}
-	} else {
-		log.Printf("listening on http://%s:%s", host, port)
 	}
 }
 

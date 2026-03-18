@@ -1,3 +1,17 @@
+import {
+  fetchJSON,
+  formatNumber,
+  formatDateTime,
+  renderLineChart,
+  renderCombinedChart,
+  renderPercentileChart as pwRenderPercentile,
+  SPEEDPLANE_COMBINED_SERIES,
+  speedtestRowToTimeSeries,
+  DEFAULT_PAN_WINDOW_FRACTION,
+  type RangeKey,
+  type ChartPanState,
+} from "../../../packages/planeweb/src/index.ts";
+
 type SpeedtestResult = {
   id: string;
   timestamp: string;
@@ -36,98 +50,12 @@ type Schedule = {
   time_of_day?: string;
 };
 
-type RangeKey = "24h" | "7d" | "30d";
-
 function $(id: string): HTMLElement {
   const el = document.getElementById(id);
   if (!el) {
     throw new Error(`Missing element #${id}`);
   }
   return el;
-}
-
-async function fetchJSON<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText}`);
-  }
-  return (await res.json()) as T;
-}
-
-function formatNumber(val: number | undefined | null, digits = 2): string {
-  if (val == null || Number.isNaN(val)) return "–";
-  return val.toFixed(digits);
-}
-
-function formatDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function formatTime24h(date: Date): string {
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}`;
-}
-
-function formatDateTime(date: Date): string {
-  return `${formatDate(date)} ${formatTime24h(date)}`;
-}
-
-/** X-axis label: 24h = time + date (YYYY-MM-DD) at day change; 7d = YYYY-MM-DD; 30d = YYYY-MM-DD on Mondays only. */
-function formatChartXLabel(
-  date: Date,
-  range: RangeKey,
-  previousLabelDate: Date | null
-): string {
-  if (range === "24h") {
-    const showDate = !previousLabelDate || date.getDate() !== previousLabelDate.getDate() || date.getMonth() !== previousLabelDate.getMonth();
-    if (showDate) return `${formatDate(date)} ${formatTime24h(date)}`;
-    return formatTime24h(date);
-  }
-  if (range === "7d") return formatDate(date);
-  if (range === "30d") return date.getDay() === 1 ? formatDate(date) : "";
-  return formatTime24h(date);
-}
-
-const CHART_TOOLTIP_CLASS = "chart-tooltip";
-let sharedChartTooltip: HTMLElement | null = null;
-
-function getOrCreateChartTooltip(): HTMLElement {
-  if (sharedChartTooltip && sharedChartTooltip.parentNode) {
-    sharedChartTooltip.style.display = "none";
-    return sharedChartTooltip;
-  }
-  sharedChartTooltip = document.createElement("div");
-  sharedChartTooltip.className = CHART_TOOLTIP_CLASS;
-  sharedChartTooltip.style.cssText = `
-    position: fixed;
-    background: rgba(26, 26, 26, 0.95);
-    border: 1px solid var(--border, rgba(255,140,0,.25));
-    border-radius: 4px;
-    padding: 6px 10px;
-    font-size: 11px;
-    color: var(--txt, #E8E8E8);
-    pointer-events: none;
-    z-index: 10000;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    display: none;
-    white-space: nowrap;
-  `;
-  document.body.appendChild(sharedChartTooltip);
-  return sharedChartTooltip;
-}
-
-function hideChartTooltip(): void {
-  if (sharedChartTooltip) sharedChartTooltip.style.display = "none";
 }
 
 /* ---------- SUMMARY CARDS ---------- */
@@ -454,13 +382,7 @@ async function loadChartData(
   return await fetchJSON<ChartDataResponse>(url);
 }
 
-// Pan state for draggable charts: offset 0..1, windowFraction (e.g. 0.4 = show 40% of data)
-type ChartPanState = { offset: number; windowFraction: number };
-const MIN_POINTS_FOR_PAN = 10;
-const DEFAULT_PAN_WINDOW_FRACTION = 0.4;
-
 let chartPanState: ChartPanState = { offset: 0, windowFraction: DEFAULT_PAN_WINDOW_FRACTION };
-/** Cached full data per range so pan can re-render each chart with its own range. */
 const chartFullDataByRange: Partial<Record<RangeKey, SpeedtestResult[]>> = {};
 let chartLastRange: RangeKey | null = null;
 
@@ -472,21 +394,19 @@ function getChartPanOpts(range: RangeKey): { range: RangeKey; pan: ChartPanState
   return { range, pan: chartPanState, onPanChange: refreshDashboardCharts };
 }
 
-function sliceRowsForPan(
-  rows: SpeedtestResult[],
-  pan: ChartPanState
-): SpeedtestResult[] {
-  if (rows.length <= MIN_POINTS_FOR_PAN) return rows;
-  const visibleCount = Math.max(
-    1,
-    Math.min(rows.length, Math.ceil(rows.length * pan.windowFraction))
-  );
-  const maxStart = Math.max(0, rows.length - visibleCount);
-  const startIndex = Math.min(
-    maxStart,
-    Math.round(pan.offset * maxStart)
-  );
-  return rows.slice(startIndex, startIndex + visibleCount);
+function lineMetricMeta(
+  key: "download_mbps" | "upload_mbps" | "ping_ms" | "jitter_ms",
+): { name: string; unit: string } {
+  switch (key) {
+    case "download_mbps":
+      return { name: "Download", unit: "Mbps" };
+    case "upload_mbps":
+      return { name: "Upload", unit: "Mbps" };
+    case "ping_ms":
+      return { name: "Ping", unit: "ms" };
+    case "jitter_ms":
+      return { name: "Jitter", unit: "ms" };
+  }
 }
 
 function refreshDashboardCharts(): void {
@@ -496,10 +416,21 @@ function refreshDashboardCharts(): void {
     const range = (($("range-combined") as HTMLSelectElement)?.value || "24h") as RangeKey;
     const rows = chartFullDataByRange[range];
     if (rows) {
-      renderCombinedChart("combined-chart", rows, range, { ...panOptsBase, range });
+      renderCombinedChart(
+        "combined-chart",
+        rows.map(speedtestRowToTimeSeries),
+        SPEEDPLANE_COMBINED_SERIES,
+        { ...panOptsBase, range },
+      );
     }
   } else {
-    const charts: { id: string; key: "download_mbps" | "upload_mbps" | "ping_ms" | "jitter_ms"; rangeSelectId: string; toggleId: string; metric: "download" | "upload" | "ping" | "jitter" }[] = [
+    const charts: {
+      id: string;
+      key: "download_mbps" | "upload_mbps" | "ping_ms" | "jitter_ms";
+      rangeSelectId: string;
+      toggleId: string;
+      metric: "download" | "upload" | "ping" | "jitter";
+    }[] = [
       { id: "download-chart", key: "download_mbps", rangeSelectId: "range-download", toggleId: "chart-type-download", metric: "download" },
       { id: "upload-chart", key: "upload_mbps", rangeSelectId: "range-upload", toggleId: "chart-type-upload", metric: "upload" },
       { id: "latency-chart", key: "ping_ms", rangeSelectId: "range-latency", toggleId: "chart-type-latency", metric: "ping" },
@@ -515,382 +446,18 @@ function refreshDashboardCharts(): void {
       } else {
         const rows = range ? chartFullDataByRange[range] : undefined;
         if (rows) {
-          renderLineChart(c.id, rows, c.key, { ...panOptsBase, range });
+          const m = lineMetricMeta(c.key);
+          renderLineChart(c.id, rows.map(speedtestRowToTimeSeries), c.key, {
+            ...panOptsBase,
+            range,
+            metricName: m.name,
+            metricUnit: m.unit,
+          });
         }
       }
     }
   }
 }
-
-function setupChartPan(
-  container: HTMLElement,
-  onPanChange: () => void
-): void {
-  const prevController = (container as HTMLElement & { __panAbort?: AbortController }).__panAbort;
-  if (prevController) prevController.abort();
-  const controller = new AbortController();
-  (container as HTMLElement & { __panAbort?: AbortController }).__panAbort = controller;
-  const { signal } = controller;
-
-  let dragging = false;
-  let startClientX = 0;
-  let startOffset = 0;
-
-  const onMouseDown = (e: MouseEvent): void => {
-    if (e.button !== 0) return;
-    hideChartTooltip();
-    dragging = true;
-    startClientX = e.clientX;
-    startOffset = chartPanState.offset;
-    container.style.cursor = "grabbing";
-    e.preventDefault();
-  };
-
-  const onMouseMove = (e: MouseEvent): void => {
-    if (!dragging) return;
-    const chartWidth = container.clientWidth || 300;
-    const deltaX = e.clientX - startClientX;
-    const offsetDelta = deltaX / chartWidth;
-    chartPanState.offset = Math.max(
-      0,
-      Math.min(1, startOffset + offsetDelta)
-    );
-    startClientX = e.clientX;
-    startOffset = chartPanState.offset;
-    onPanChange();
-  };
-
-  const onMouseUp = (): void => {
-    if (!dragging) return;
-    dragging = false;
-    container.style.cursor = "grab";
-  };
-
-  container.addEventListener("mousedown", onMouseDown as EventListener, { signal });
-  container.addEventListener("mouseenter", () => { if (!dragging) container.style.cursor = "grab"; }, { signal });
-  container.addEventListener("mouseleave", () => { container.style.cursor = ""; onMouseUp(); }, { signal });
-  document.addEventListener("mousemove", onMouseMove, { signal });
-  document.addEventListener("mouseup", onMouseUp, { signal });
-  container.style.cursor = "grab";
-  container.title = "Drag to pan";
-}
-
-function renderLineChart(
-  containerId: string,
-  rows: SpeedtestResult[],
-  key: "download_mbps" | "upload_mbps" | "ping_ms" | "jitter_ms",
-  options?: { range?: RangeKey; pan?: ChartPanState; onPanChange?: () => void; skipPanSetup?: boolean },
-): void {
-  const container = $(containerId);
-  container.innerHTML = "";
-
-  const pan = options?.pan;
-  const usePan = pan && rows.length >= MIN_POINTS_FOR_PAN && options?.onPanChange && !options?.skipPanSetup;
-  const usePanSlice = pan && rows.length >= MIN_POINTS_FOR_PAN && options?.onPanChange;
-  const drawRows = usePanSlice ? sliceRowsForPan(rows, pan!) : rows;
-  const range = options?.range ?? "24h";
-
-  if (!drawRows.length) {
-    container.textContent = "No data for selected range.";
-    return;
-  }
-
-  const svgNS = "http://www.w3.org/2000/svg";
-  // Use fixed viewBox coordinate system - SVG will scale to container
-  // This ensures labels and elements are positioned correctly
-  const width = 300;
-  const height = 50;
-  const paddingX = 12;
-  const paddingY = 8;
-  const paddingBottom = 12; // Space for x-axis labels
-
-  const svg = document.createElementNS(svgNS, "svg");
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-  svg.style.width = "100%";
-  svg.style.height = "100%";
-
-  const times = drawRows.map((r) => new Date(r.timestamp).getTime());
-  const values = drawRows.map((r) => {
-    const val = (r as any)[key] as number;
-    // Handle optional fields that might be undefined
-    if (key === "jitter_ms") {
-      return val ?? 0;
-    }
-    return val;
-  });
-
-  const minX = Math.min(...times);
-  const maxX = Math.max(...times);
-  let minY = Math.min(...values);
-  let maxY = Math.max(...values);
-
-  if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
-    container.textContent = "No valid data.";
-    return;
-  }
-
-  if (minY === maxY) {
-    const delta = minY === 0 ? 1 : minY * 0.1;
-    minY -= delta;
-    maxY += delta;
-  }
-
-  const innerW = width - paddingX * 2;
-  const innerH = height - paddingY - paddingBottom;
-
-  const tooltip = getOrCreateChartTooltip();
-
-  // Helper to get metric name and unit
-  const getMetricInfo = (k: string): { name: string; unit: string } => {
-    switch (k) {
-      case "download_mbps":
-        return { name: "Download", unit: "Mbps" };
-      case "upload_mbps":
-        return { name: "Upload", unit: "Mbps" };
-      case "ping_ms":
-        return { name: "Ping", unit: "ms" };
-      case "jitter_ms":
-        return { name: "Jitter", unit: "ms" };
-      default:
-        return { name: "Value", unit: "" };
-    }
-  };
-
-  const metricInfo = getMetricInfo(key);
-
-  // Draw horizontal grid lines (dimmer white)
-  const gridLines = 3;
-  for (let i = 0; i <= gridLines; i++) {
-    const yPos = paddingY + (innerH / gridLines) * i;
-    const grid = document.createElementNS(svgNS, "line");
-    grid.setAttribute("x1", paddingX.toString());
-    grid.setAttribute("x2", (width - paddingX).toString());
-    grid.setAttribute("y1", yPos.toString());
-    grid.setAttribute("y2", yPos.toString());
-    grid.setAttribute("stroke", "rgba(255,255,255,0.08)");
-    grid.setAttribute("stroke-width", "0.3");
-    svg.appendChild(grid);
-
-    // Add bandwidth value labels on the left
-    const value = maxY - (maxY - minY) * (i / gridLines);
-    const text = document.createElementNS(svgNS, "text");
-    text.setAttribute("x", (paddingX - 2).toString());
-    text.setAttribute("y", (yPos + 1.5).toString());
-    text.setAttribute("text-anchor", "end");
-    text.setAttribute("fill", "rgba(255,255,255,0.4)");
-    text.setAttribute("font-size", "2.5");
-    text.textContent = formatNumber(value, 1);
-    svg.appendChild(text);
-  }
-
-  // Draw vertical lines for each test (dimmer)
-  const coords = drawRows.map((r) => {
-    const t = new Date(r.timestamp).getTime();
-    const xNorm = maxX === minX ? 0 : (t - minX) / (maxX - minX);
-    const v = (r as any)[key] as number;
-    const yNorm = maxY === minY ? 0.5 : (v - minY) / (maxY - minY);
-    const x = paddingX + xNorm * innerW;
-    const y = paddingY + innerH - yNorm * innerH;
-    return { x, y, time: t };
-  });
-
-  // Draw vertical lines for each test point
-  coords.forEach((coord) => {
-    const vLine = document.createElementNS(svgNS, "line");
-    vLine.setAttribute("x1", coord.x.toString());
-    vLine.setAttribute("x2", coord.x.toString());
-    vLine.setAttribute("y1", paddingY.toString());
-    vLine.setAttribute("y2", (paddingY + innerH).toString());
-    vLine.setAttribute("stroke", "rgba(255,255,255,0.06)");
-    vLine.setAttribute("stroke-width", "0.2");
-    svg.appendChild(vLine);
-  });
-
-  // Calculate and draw average line
-  const avgValue = values.reduce((sum, val) => sum + val, 0) / values.length;
-  if (Number.isFinite(avgValue) && avgValue >= minY && avgValue <= maxY) {
-    const avgYNorm = (avgValue - minY) / (maxY - minY);
-    const avgY = paddingY + innerH - avgYNorm * innerH;
-
-    const avgLine = document.createElementNS(svgNS, "line");
-    avgLine.setAttribute("x1", paddingX.toString());
-    avgLine.setAttribute("x2", (width - paddingX).toString());
-    avgLine.setAttribute("y1", avgY.toString());
-    avgLine.setAttribute("y2", avgY.toString());
-    avgLine.setAttribute("stroke", "#ff4757");
-    avgLine.setAttribute("stroke-width", "0.6");
-    avgLine.setAttribute("stroke-dasharray", "2,2");
-    avgLine.setAttribute("opacity", "0.8");
-    avgLine.style.cursor = "pointer";
-
-    // Add hover event for average line tooltip
-    avgLine.addEventListener("mouseenter", (e) => {
-      const svgRect = svg.getBoundingClientRect();
-      const scaleY = svgRect.height / height;
-      const mouseX = (e as MouseEvent).clientX;
-      const y = svgRect.top + avgY * scaleY;
-
-      tooltip.innerHTML = `
-        <div style="font-weight: 600; margin-bottom: 2px;">Average ${metricInfo.name}</div>
-        <div>${formatNumber(avgValue, 2)} ${metricInfo.unit}</div>
-        <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">Based on ${drawRows.length} measurement${drawRows.length !== 1 ? "s" : ""}</div>
-      `;
-      tooltip.style.display = "block";
-
-      // Position tooltip above the cursor, centered horizontally
-      const tooltipRect = tooltip.getBoundingClientRect();
-      tooltip.style.left = `${mouseX - tooltipRect.width / 2}px`;
-      tooltip.style.top = `${y - tooltipRect.height - 8}px`;
-    });
-
-    avgLine.addEventListener("mouseleave", () => {
-      tooltip.style.display = "none";
-    });
-
-    svg.appendChild(avgLine);
-  }
-
-  // Draw the data line
-  const path = document.createElementNS(svgNS, "path");
-  const d = coords
-    .map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
-    .join(" ");
-  path.setAttribute("d", d);
-  path.setAttribute("fill", "none");
-  path.setAttribute("stroke", "rgba(255,179,65,0.9)");
-  path.setAttribute("stroke-width", "0.8");
-  path.setAttribute("stroke-linejoin", "round");
-  path.setAttribute("stroke-linecap", "round");
-  svg.appendChild(path);
-
-
-  // Draw data points with tooltips
-  coords.forEach((coord, index) => {
-    const circle = document.createElementNS(svgNS, "circle");
-    circle.setAttribute("cx", coord.x.toString());
-    circle.setAttribute("cy", coord.y.toString());
-    circle.setAttribute("r", "1.2");
-    circle.setAttribute("fill", "#ffb341");
-    circle.style.cursor = "pointer";
-
-    // Add hover events for tooltip
-    const row = drawRows[index];
-    const value = values[index];
-    const date = new Date(row.timestamp);
-
-    circle.addEventListener("mouseenter", (e) => {
-      const svgRect = svg.getBoundingClientRect();
-      const scaleX = svgRect.width / width;
-      const scaleY = svgRect.height / height;
-
-      // Highlight the circle
-      circle.setAttribute("r", "1.4");
-      circle.setAttribute("fill", "#ffb341");
-      circle.setAttribute("stroke", "#ffd700");
-      circle.setAttribute("stroke-width", "0.5");
-
-      tooltip.innerHTML = `
-        <div style="font-weight: 600; margin-bottom: 2px;">${metricInfo.name}</div>
-        <div>${formatNumber(value, 2)} ${metricInfo.unit}</div>
-        <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">${formatDateTime(date)}</div>
-      `;
-      tooltip.style.display = "block";
-
-      const x = svgRect.left + coord.x * scaleX;
-      const y = svgRect.top + coord.y * scaleY;
-
-      // Position tooltip above the point, centered horizontally
-      // Get dimensions after display
-      const tooltipRect = tooltip.getBoundingClientRect();
-      tooltip.style.left = `${x - tooltipRect.width / 2}px`;
-      tooltip.style.top = `${y - tooltipRect.height - 8}px`;
-    });
-
-    circle.addEventListener("mouseleave", () => {
-      // Restore original circle size
-      circle.setAttribute("r", "1.2");
-      circle.setAttribute("fill", "#ffb341");
-      circle.removeAttribute("stroke");
-      circle.removeAttribute("stroke-width");
-      tooltip.style.display = "none";
-    });
-
-    svg.appendChild(circle);
-  });
-
-  // Add x-axis labels by range: 24h = time + date at day change; 7d = YYYY-MM-DD; 30d = YYYY-MM-DD on Mondays only. Draw a tick above each label so it's clear which block the date refers to.
-  const tickY1 = height - paddingBottom;
-  const tickY2 = height - paddingBottom + 4;
-  const labelY = height - paddingBottom + 8;
-  let previousLabelDate: Date | null = null;
-  if (range === "30d") {
-    const minDate = new Date(minX);
-    let monday = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate(), 0, 0, 0, 0);
-    const startDay = monday.getDay();
-    const daysToMonday = startDay === 0 ? 1 : startDay === 1 ? 0 : 8 - startDay;
-    monday.setDate(monday.getDate() + daysToMonday);
-    while (monday.getTime() <= maxX) {
-      const xNorm = (monday.getTime() - minX) / (maxX - minX);
-      if (xNorm >= 0 && xNorm <= 1) {
-        const x = paddingX + xNorm * innerW;
-        const label = formatChartXLabel(monday, range, null);
-        if (label) {
-          const tick = document.createElementNS(svgNS, "line");
-          tick.setAttribute("x1", x.toString());
-          tick.setAttribute("y1", tickY1.toString());
-          tick.setAttribute("x2", x.toString());
-          tick.setAttribute("y2", tickY2.toString());
-          tick.setAttribute("stroke", "rgba(255,255,255,0.4)");
-          tick.setAttribute("stroke-width", "0.4");
-          svg.appendChild(tick);
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", x.toString());
-          text.setAttribute("y", labelY.toString());
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("fill", "rgba(255,255,255,0.4)");
-          text.setAttribute("font-size", "2.5");
-          text.textContent = label;
-          svg.appendChild(text);
-        }
-      }
-      monday.setDate(monday.getDate() + 7);
-    }
-  } else {
-    const labelCount = range === "24h" ? Math.min(drawRows.length, 6) : Math.min(drawRows.length, 7);
-    const labelStep = Math.max(1, Math.floor(drawRows.length / labelCount));
-    for (let i = 0; i < drawRows.length; i += labelStep) {
-      if (i >= coords.length) break;
-      const coord = coords[i];
-      const date = new Date(drawRows[i].timestamp);
-      const timeStr = formatChartXLabel(date, range, previousLabelDate);
-      if (range === "24h" || range === "7d") previousLabelDate = date;
-      const tick = document.createElementNS(svgNS, "line");
-      tick.setAttribute("x1", coord.x.toString());
-      tick.setAttribute("y1", tickY1.toString());
-      tick.setAttribute("x2", coord.x.toString());
-      tick.setAttribute("y2", tickY2.toString());
-      tick.setAttribute("stroke", "rgba(255,255,255,0.4)");
-      tick.setAttribute("stroke-width", "0.4");
-      svg.appendChild(tick);
-      const text = document.createElementNS(svgNS, "text");
-      text.setAttribute("x", coord.x.toString());
-      text.setAttribute("y", labelY.toString());
-      text.setAttribute("text-anchor", "middle");
-      text.setAttribute("fill", "rgba(255,255,255,0.4)");
-      text.setAttribute("font-size", "2.5");
-      text.textContent = timeStr;
-      svg.appendChild(text);
-    }
-  }
-
-  container.appendChild(svg);
-
-  if (usePan && options?.onPanChange) {
-    setupChartPan(container, options.onPanChange);
-  }
-}
-
 
 async function renderPercentileChart(
   containerId: string,
@@ -905,151 +472,19 @@ async function renderPercentileChart(
   container.style.cursor = "";
 
   const chartData = await loadChartData(range, metric);
-  const rows = chartData.data;
-
-  if (!rows.length || !chartData.stats) {
+  if (!chartData.data.length || !chartData.stats) {
     container.textContent = "No data for selected range.";
     return;
   }
-
-  const stats = chartData.stats;
-  const svgNS = "http://www.w3.org/2000/svg";
-  // Use fixed viewBox coordinate system - SVG will scale to container
-  // This ensures labels and elements are positioned correctly
-  const width = 300;
-  const height = 50;
-  const paddingX = 12;
-  const paddingY = 8;
-  const paddingBottom = 12;
-
-  const svg = document.createElementNS(svgNS, "svg");
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-  svg.style.width = "100%";
-  svg.style.height = "100%";
-
-  let minY = Math.min(stats.min, stats.p10);
-  let maxY = Math.max(stats.max, stats.p90);
-  if (minY === maxY) {
-    const delta = minY === 0 ? 1 : minY * 0.1;
-    minY -= delta;
-    maxY += delta;
-  }
-
-  const innerW = width - paddingX * 2;
-  const innerH = height - paddingY - paddingBottom;
-
-  const yPos = (val: number): number => {
-    const yNorm = maxY === minY ? 0.5 : (val - minY) / (maxY - minY);
-    return paddingY + innerH - yNorm * innerH;
-  };
-
-  // Draw grid lines
-  const gridLines = 3;
-  for (let i = 0; i <= gridLines; i++) {
-    const yPos = paddingY + (innerH / gridLines) * i;
-    const grid = document.createElementNS(svgNS, "line");
-    grid.setAttribute("x1", paddingX.toString());
-    grid.setAttribute("x2", (width - paddingX).toString());
-    grid.setAttribute("y1", yPos.toString());
-    grid.setAttribute("y2", yPos.toString());
-    grid.setAttribute("stroke", "rgba(255,255,255,0.08)");
-    grid.setAttribute("stroke-width", "0.3");
-    svg.appendChild(grid);
-
-    const value = maxY - (maxY - minY) * (i / gridLines);
-    const text = document.createElementNS(svgNS, "text");
-    text.setAttribute("x", (paddingX - 2).toString());
-    text.setAttribute("y", (yPos + 1.5).toString());
-    text.setAttribute("text-anchor", "end");
-    text.setAttribute("fill", "rgba(255,255,255,0.4)");
-    text.setAttribute("font-size", "2.5");
-    text.textContent = formatNumber(value, 1);
-    svg.appendChild(text);
-  }
-
-  const centerX = width / 2;
-  const boxWidth = innerW * 0.4;
-  const whiskerCapWidth = 6;
-
-  // Draw box (Q1 to Q3) - filled orange, drawn first so whiskers appear on top
-  const boxY1 = yPos(stats.q3); // Top of box (Q3 is higher value, lower Y position)
-  const boxY2 = yPos(stats.q1); // Bottom of box (Q1 is lower value, higher Y position)
-  const box = document.createElementNS(svgNS, "rect");
-  box.setAttribute("x", (centerX - boxWidth / 2).toString());
-  box.setAttribute("y", boxY1.toString());
-  box.setAttribute("width", boxWidth.toString());
-  box.setAttribute("height", (boxY2 - boxY1).toString());
-  box.setAttribute("fill", "#ffb341"); // Solid orange fill
-  box.setAttribute("stroke", "rgba(255,179,65,0.8)");
-  box.setAttribute("stroke-width", "0.3");
-  svg.appendChild(box);
-
-  // Draw median line (darker orange inside the box)
-  const medianY = yPos(stats.median);
-  const medianLine = document.createElementNS(svgNS, "line");
-  medianLine.setAttribute("x1", (centerX - boxWidth / 2).toString());
-  medianLine.setAttribute("x2", (centerX + boxWidth / 2).toString());
-  medianLine.setAttribute("y1", medianY.toString());
-  medianLine.setAttribute("y2", medianY.toString());
-  medianLine.setAttribute("stroke", "#ff8c00"); // Darker orange for median
-  medianLine.setAttribute("stroke-width", "1.2");
-  svg.appendChild(medianLine);
-
-  // Draw whiskers (vertical lines with horizontal caps)
-  // Upper whisker: from Q3 to max
-  const upperWhiskerY = yPos(stats.max);
-  const upperWhisker = document.createElementNS(svgNS, "line");
-  upperWhisker.setAttribute("x1", centerX.toString());
-  upperWhisker.setAttribute("x2", centerX.toString());
-  upperWhisker.setAttribute("y1", boxY1.toString()); // Start at top of box (Q3)
-  upperWhisker.setAttribute("y2", upperWhiskerY.toString()); // End at max
-  upperWhisker.setAttribute("stroke", "rgba(255,255,255,0.4)");
-  upperWhisker.setAttribute("stroke-width", "0.4");
-  svg.appendChild(upperWhisker);
-
-  // Upper whisker cap (horizontal line at max)
-  const upperCap = document.createElementNS(svgNS, "line");
-  upperCap.setAttribute("x1", (centerX - whiskerCapWidth / 2).toString());
-  upperCap.setAttribute("x2", (centerX + whiskerCapWidth / 2).toString());
-  upperCap.setAttribute("y1", upperWhiskerY.toString());
-  upperCap.setAttribute("y2", upperWhiskerY.toString());
-  upperCap.setAttribute("stroke", "rgba(255,255,255,0.4)");
-  upperCap.setAttribute("stroke-width", "0.4");
-  svg.appendChild(upperCap);
-
-  // Lower whisker: from Q1 to min
-  const lowerWhiskerY = yPos(stats.min);
-  const lowerWhisker = document.createElementNS(svgNS, "line");
-  lowerWhisker.setAttribute("x1", centerX.toString());
-  lowerWhisker.setAttribute("x2", centerX.toString());
-  lowerWhisker.setAttribute("y1", boxY2.toString()); // Start at bottom of box (Q1)
-  lowerWhisker.setAttribute("y2", lowerWhiskerY.toString()); // End at min
-  lowerWhisker.setAttribute("stroke", "rgba(255,255,255,0.4)");
-  lowerWhisker.setAttribute("stroke-width", "0.4");
-  svg.appendChild(lowerWhisker);
-
-  // Lower whisker cap (horizontal line at min)
-  const lowerCap = document.createElementNS(svgNS, "line");
-  lowerCap.setAttribute("x1", (centerX - whiskerCapWidth / 2).toString());
-  lowerCap.setAttribute("x2", (centerX + whiskerCapWidth / 2).toString());
-  lowerCap.setAttribute("y1", lowerWhiskerY.toString());
-  lowerCap.setAttribute("y2", lowerWhiskerY.toString());
-  lowerCap.setAttribute("stroke", "rgba(255,255,255,0.4)");
-  lowerCap.setAttribute("stroke-width", "0.4");
-  svg.appendChild(lowerCap);
-
-  // Add statistics text
-  const statsText = document.createElementNS(svgNS, "text");
-  statsText.setAttribute("x", centerX.toString());
-  statsText.setAttribute("y", (height - paddingBottom + 6).toString());
-  statsText.setAttribute("text-anchor", "middle");
-  statsText.setAttribute("fill", "rgba(255,255,255,0.5)");
-  statsText.setAttribute("font-size", "2.2");
-  statsText.textContent = `Med: ${formatNumber(stats.median, 1)} | Q1: ${formatNumber(stats.q1, 1)} | Q3: ${formatNumber(stats.q3, 1)}`;
-  svg.appendChild(statsText);
-
-  container.appendChild(svg);
+  const meta =
+    metric === "download"
+      ? { n: "Download", u: "Mbps" }
+      : metric === "upload"
+        ? { n: "Upload", u: "Mbps" }
+        : metric === "ping"
+          ? { n: "Ping", u: "ms" }
+          : { n: "Jitter", u: "ms" };
+  pwRenderPercentile(containerId, chartData.stats, meta.n, meta.u);
 }
 
 async function updateDownloadChart(): Promise<void> {
@@ -1061,7 +496,11 @@ async function updateDownloadChart(): Promise<void> {
   } else {
     const rows = await loadHistoryForRange(value);
     chartFullDataByRange[value] = rows;
-    renderLineChart("download-chart", rows, "download_mbps", getChartPanOpts(value));
+    renderLineChart("download-chart", rows.map(speedtestRowToTimeSeries), "download_mbps", {
+      ...getChartPanOpts(value),
+      metricName: "Download",
+      metricUnit: "Mbps",
+    });
   }
 }
 
@@ -1074,7 +513,11 @@ async function updateUploadChart(): Promise<void> {
   } else {
     const rows = await loadHistoryForRange(value);
     chartFullDataByRange[value] = rows;
-    renderLineChart("upload-chart", rows, "upload_mbps", getChartPanOpts(value));
+    renderLineChart("upload-chart", rows.map(speedtestRowToTimeSeries), "upload_mbps", {
+      ...getChartPanOpts(value),
+      metricName: "Upload",
+      metricUnit: "Mbps",
+    });
   }
 }
 
@@ -1087,7 +530,11 @@ async function updateLatencyChart(): Promise<void> {
   } else {
     const rows = await loadHistoryForRange(value);
     chartFullDataByRange[value] = rows;
-    renderLineChart("latency-chart", rows, "ping_ms", getChartPanOpts(value));
+    renderLineChart("latency-chart", rows.map(speedtestRowToTimeSeries), "ping_ms", {
+      ...getChartPanOpts(value),
+      metricName: "Ping",
+      metricUnit: "ms",
+    });
   }
 }
 
@@ -1100,445 +547,28 @@ async function updateJitterChart(): Promise<void> {
   } else {
     const rows = await loadHistoryForRange(value);
     chartFullDataByRange[value] = rows;
-    renderLineChart("jitter-chart", rows, "jitter_ms", getChartPanOpts(value));
-  }
-}
-
-function renderCombinedChart(
-  containerId: string,
-  rows: SpeedtestResult[],
-  range?: RangeKey,
-  options?: { range?: RangeKey; pan?: ChartPanState; onPanChange?: () => void; skipPanSetup?: boolean },
-): void {
-  const container = $(containerId);
-  container.innerHTML = "";
-
-  const pan = options?.pan;
-  const usePan = pan && rows.length >= MIN_POINTS_FOR_PAN && options?.onPanChange && !options?.skipPanSetup;
-  const usePanSlice = pan && rows.length >= MIN_POINTS_FOR_PAN && options?.onPanChange;
-  const drawRows = usePanSlice ? sliceRowsForPan(rows, pan!) : rows;
-  const chartRange = options?.range ?? range ?? "24h";
-
-  if (!drawRows.length) {
-    container.textContent = "No data for selected range.";
-    return;
-  }
-
-  const svgNS = "http://www.w3.org/2000/svg";
-  const width = 300;
-  const height = 50;
-  const paddingLeft = 28; // Space for Y-axis labels
-  const paddingRight = 12;
-  const paddingTop = 8;
-  const paddingBottom = 20; // Space for X-axis labels and legend
-  const paddingX = paddingLeft;
-  const paddingY = paddingTop;
-
-  const svg = document.createElementNS(svgNS, "svg");
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-  svg.style.width = "100%";
-  svg.style.height = "100%";
-
-  const times = drawRows.map((r) => new Date(r.timestamp).getTime());
-  const downloadValues = drawRows.map((r) => r.download_mbps);
-  const uploadValues = drawRows.map((r) => r.upload_mbps);
-  const pingValues = drawRows.map((r) => r.ping_ms);
-  const jitterValues = drawRows.map((r) => r.jitter_ms ?? 0);
-
-  const minX = Math.min(...times);
-  const maxX = Math.max(...times);
-
-  // Colors for each metric
-  const metrics = [
-    { key: "download_mbps", values: downloadValues, color: "#4ade80", name: "Download", unit: "Mbps" },
-    { key: "upload_mbps", values: uploadValues, color: "#60a5fa", name: "Upload", unit: "Mbps" },
-    { key: "ping_ms", values: pingValues, color: "#fbbf24", name: "Ping", unit: "ms" },
-    { key: "jitter_ms", values: jitterValues, color: "#f87171", name: "Jitter", unit: "ms" },
-  ];
-
-  // Check if logarithmic scale is enabled
-  const useLogarithmic = localStorage.getItem("logarithmic-scale") === "true";
-
-  // Calculate min/max for each metric separately
-  const metricRanges = metrics.map((metric) => {
-    const vals = metric.values.filter((v) => Number.isFinite(v));
-    if (vals.length === 0) {
-      if (useLogarithmic) {
-        return { min: 1, max: 10, logMin: 0, logMax: 1, logRange: 1, range: 1 };
-      }
-      return { min: 0, max: 1, range: 1 };
-    }
-    const min = Math.min(...vals);
-    const max = Math.max(...vals);
-    const range = max - min || 1; // Avoid division by zero
-
-    if (useLogarithmic) {
-      // Use a small epsilon to avoid log(0) or log(negative)
-      const safeMin = Math.max(min, 0.001);
-      const logMin = Math.log10(safeMin);
-      const logMax = Math.log10(max);
-      const logRange = logMax - logMin || 1;
-      return { min: safeMin, max, logMin, logMax, logRange, range };
-    }
-
-    return { min, max, range };
-  });
-
-  const innerW = width - paddingLeft - paddingRight;
-  const innerH = height - paddingTop - paddingBottom;
-
-  const tooltip = getOrCreateChartTooltip();
-
-  // Draw grid lines (horizontal)
-  const gridLines = 4;
-  for (let i = 0; i <= gridLines; i++) {
-    const y = paddingY + (innerH / gridLines) * i;
-    const line = document.createElementNS(svgNS, "line");
-    line.setAttribute("x1", paddingLeft.toString());
-    line.setAttribute("x2", (width - paddingRight).toString());
-    line.setAttribute("y1", y.toString());
-    line.setAttribute("y2", y.toString());
-    line.setAttribute("stroke", "rgba(255,255,255,0.1)");
-    line.setAttribute("stroke-width", "0.3");
-    svg.appendChild(line);
-  }
-
-  // Draw grid lines (vertical) - show first, middle, last
-  const verticalGridPositions = [0, Math.floor(times.length / 2), times.length - 1];
-  verticalGridPositions.forEach((idx) => {
-    if (idx < 0 || idx >= times.length) return;
-    const xNorm = (times[idx] - minX) / (maxX - minX);
-    const x = paddingLeft + xNorm * innerW;
-    const line = document.createElementNS(svgNS, "line");
-    line.setAttribute("x1", x.toString());
-    line.setAttribute("x2", x.toString());
-    line.setAttribute("y1", paddingY.toString());
-    line.setAttribute("y2", (height - paddingBottom).toString());
-    line.setAttribute("stroke", "rgba(255,255,255,0.1)");
-    line.setAttribute("stroke-width", "0.3");
-    svg.appendChild(line);
-  });
-
-  // Draw Y-axis labels
-  if (useLogarithmic) {
-    // Logarithmic scale - show combined range
-    const overallMin = Math.min(...metricRanges.map((r) => r.min));
-    const overallMax = Math.max(...metricRanges.map((r) => r.max));
-    const overallLogMin = Math.log10(Math.max(overallMin, 0.001));
-    const overallLogMax = Math.log10(overallMax);
-    const overallLogRange = overallLogMax - overallLogMin;
-
-    for (let i = 0; i <= gridLines; i++) {
-      const y = paddingY + (innerH / gridLines) * i;
-      // Calculate log position (inverted: top is max, bottom is min)
-      const logPos = overallLogMax - (i / gridLines) * overallLogRange;
-      const value = Math.pow(10, logPos);
-
-      // Format value appropriately
-      let label: string;
-      if (value >= 1000) {
-        label = `${(value / 1000).toFixed(1)}k`;
-      } else if (value >= 1) {
-        label = value.toFixed(1);
-      } else {
-        label = value.toFixed(3);
-      }
-
-      const text = document.createElementNS(svgNS, "text");
-      text.setAttribute("x", (paddingLeft - 4).toString());
-      text.setAttribute("y", (y + 1.5).toString());
-      text.setAttribute("text-anchor", "end");
-      text.setAttribute("fill", "rgba(255,255,255,0.5)");
-      text.setAttribute("font-size", "2.2");
-      text.textContent = label;
-      svg.appendChild(text);
-    }
-  } else {
-    // Percentage scale (0-100%)
-    for (let i = 0; i <= gridLines; i++) {
-      const y = paddingY + (innerH / gridLines) * i;
-      const percent = 100 - (i / gridLines) * 100;
-      const text = document.createElementNS(svgNS, "text");
-      text.setAttribute("x", (paddingLeft - 4).toString());
-      text.setAttribute("y", (y + 1.5).toString());
-      text.setAttribute("text-anchor", "end");
-      text.setAttribute("fill", "rgba(255,255,255,0.5)");
-      text.setAttribute("font-size", "2.2");
-      text.textContent = `${Math.round(percent)}%`;
-      svg.appendChild(text);
-    }
-  }
-
-  // Draw X-axis labels by range with tick marks so it's clear which block each date refers to
-  const combTickY1 = height - paddingBottom;
-  const combTickY2 = height - paddingBottom + 4;
-  const combLabelY = height - paddingBottom + 6;
-  let prevLabelDate: Date | null = null;
-  if (chartRange === "30d") {
-    const minDate = new Date(minX);
-    let monday = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate(), 0, 0, 0, 0);
-    const startDay = monday.getDay();
-    const daysToMonday = startDay === 0 ? 1 : startDay === 1 ? 0 : 8 - startDay;
-    monday.setDate(monday.getDate() + daysToMonday);
-    while (monday.getTime() <= maxX) {
-      const xNorm = (monday.getTime() - minX) / (maxX - minX);
-      if (xNorm >= 0 && xNorm <= 1) {
-        const x = paddingLeft + xNorm * innerW;
-        const label = formatChartXLabel(monday, chartRange, null);
-        if (label) {
-          const tick = document.createElementNS(svgNS, "line");
-          tick.setAttribute("x1", x.toString());
-          tick.setAttribute("y1", combTickY1.toString());
-          tick.setAttribute("x2", x.toString());
-          tick.setAttribute("y2", combTickY2.toString());
-          tick.setAttribute("stroke", "rgba(255,255,255,0.5)");
-          tick.setAttribute("stroke-width", "0.4");
-          svg.appendChild(tick);
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", x.toString());
-          text.setAttribute("y", combLabelY.toString());
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("fill", "rgba(255,255,255,0.5)");
-          text.setAttribute("font-size", "2.2");
-          text.textContent = label;
-          svg.appendChild(text);
-        }
-      }
-      monday.setDate(monday.getDate() + 7);
-    }
-  } else {
-    const labelCount = chartRange === "24h" ? 6 : 7;
-    const step = Math.max(1, Math.floor(times.length / labelCount));
-    for (let idx = 0; idx < times.length; idx += step) {
-      if (idx >= times.length) break;
-      const xNorm = (times[idx] - minX) / (maxX - minX);
-      const x = paddingLeft + xNorm * innerW;
-      const date = new Date(times[idx]);
-      const label = formatChartXLabel(date, chartRange, prevLabelDate);
-      if (chartRange === "24h" || chartRange === "7d") prevLabelDate = date;
-      const tick = document.createElementNS(svgNS, "line");
-      tick.setAttribute("x1", x.toString());
-      tick.setAttribute("y1", combTickY1.toString());
-      tick.setAttribute("x2", x.toString());
-      tick.setAttribute("y2", combTickY2.toString());
-      tick.setAttribute("stroke", "rgba(255,255,255,0.5)");
-      tick.setAttribute("stroke-width", "0.4");
-      svg.appendChild(tick);
-      const text = document.createElementNS(svgNS, "text");
-      text.setAttribute("x", x.toString());
-      text.setAttribute("y", combLabelY.toString());
-      text.setAttribute("text-anchor", "middle");
-      text.setAttribute("fill", "rgba(255,255,255,0.5)");
-      text.setAttribute("font-size", "2.2");
-      text.textContent = label;
-      svg.appendChild(text);
-    }
-  }
-
-  // Calculate overall range for positioning (used in both modes)
-  let overallMin: number, overallMax: number, overallRange: number;
-  let overallLogMin: number, overallLogMax: number, overallLogRange: number;
-
-  if (useLogarithmic) {
-    overallMin = Math.min(...metricRanges.map((r) => r.min));
-    overallMax = Math.max(...metricRanges.map((r) => r.max));
-    overallLogMin = Math.log10(Math.max(overallMin, 0.001));
-    overallLogMax = Math.log10(overallMax);
-    overallLogRange = overallLogMax - overallLogMin;
-  } else {
-    // For percentage mode, normalize each metric separately
-    overallMin = 0;
-    overallMax = 1;
-    overallRange = 1;
-  }
-
-  // Draw lines, averages, and data points for each metric
-  metrics.forEach((metric, metricIdx) => {
-    const range = metricRanges[metricIdx];
-    const coords: { x: number; y: number }[] = [];
-
-    for (let i = 0; i < times.length; i++) {
-      const xNorm = (times[i] - minX) / (maxX - minX);
-      const x = paddingLeft + xNorm * innerW;
-
-      let yNorm: number;
-      if (useLogarithmic) {
-        // Use logarithmic normalization
-        const safeValue = Math.max(metric.values[i], 0.001);
-        const overallLogValue = Math.log10(safeValue);
-        yNorm = overallLogRange > 0
-          ? (overallLogValue - overallLogMin) / overallLogRange
-          : 0.5;
-      } else {
-        // Use linear normalization (percentage) - each metric normalized separately
-        yNorm = range.range > 0 ? (metric.values[i] - range.min) / range.range : 0.5;
-      }
-
-      const y = paddingY + innerH - yNorm * innerH;
-      coords.push({ x, y });
-    }
-
-    // Calculate and draw average line
-    const avgValue = metric.values.reduce((sum, val) => sum + val, 0) / metric.values.length;
-    if (Number.isFinite(avgValue)) {
-      let avgYNorm: number;
-      if (useLogarithmic) {
-        if (avgValue > 0) {
-          const safeAvg = Math.max(avgValue, 0.001);
-          const logAvg = Math.log10(safeAvg);
-          avgYNorm = overallLogRange > 0
-            ? (logAvg - overallLogMin) / overallLogRange
-            : 0.5;
-        } else {
-          return; // Skip average line if value is <= 0 in log mode
-        }
-      } else {
-        avgYNorm = range.range > 0 ? (avgValue - range.min) / range.range : 0.5;
-        if (avgYNorm < 0 || avgYNorm > 1) return; // Skip if outside range
-      }
-
-      const avgY = paddingY + innerH - avgYNorm * innerH;
-
-      const avgLine = document.createElementNS(svgNS, "line");
-      avgLine.setAttribute("x1", paddingLeft.toString());
-      avgLine.setAttribute("x2", (width - paddingRight).toString());
-      avgLine.setAttribute("y1", avgY.toString());
-      avgLine.setAttribute("y2", avgY.toString());
-      avgLine.setAttribute("stroke", metric.color);
-      avgLine.setAttribute("stroke-width", "0.6");
-      avgLine.setAttribute("stroke-dasharray", "2,2");
-      avgLine.setAttribute("opacity", "0.6");
-      avgLine.style.cursor = "pointer";
-
-      // Add hover event for average line tooltip
-      avgLine.addEventListener("mouseenter", (e) => {
-        const svgRect = svg.getBoundingClientRect();
-        const scaleY = svgRect.height / height;
-        const mouseX = (e as MouseEvent).clientX;
-        const y = svgRect.top + avgY * scaleY;
-
-        tooltip.innerHTML = `
-          <div style="font-weight: 600; margin-bottom: 2px;">Average ${metric.name}</div>
-          <div>${formatNumber(avgValue, 2)} ${metric.unit}</div>
-          <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">Based on ${drawRows.length} measurement${drawRows.length !== 1 ? "s" : ""}</div>
-        `;
-        tooltip.style.display = "block";
-        const tooltipRect = tooltip.getBoundingClientRect();
-        tooltip.style.left = `${mouseX - tooltipRect.width / 2}px`;
-        tooltip.style.top = `${y - tooltipRect.height - 5}px`;
-      });
-
-      avgLine.addEventListener("mouseleave", () => {
-        tooltip.style.display = "none";
-      });
-
-      svg.appendChild(avgLine);
-    }
-
-    // Draw line
-    if (coords.length > 1) {
-      const path = document.createElementNS(svgNS, "path");
-      let pathData = `M ${coords[0].x} ${coords[0].y}`;
-      for (let i = 1; i < coords.length; i++) {
-        pathData += ` L ${coords[i].x} ${coords[i].y}`;
-      }
-      path.setAttribute("d", pathData);
-      path.setAttribute("fill", "none");
-      path.setAttribute("stroke", metric.color);
-      path.setAttribute("stroke-width", "0.8");
-      path.setAttribute("opacity", "0.8");
-      svg.appendChild(path);
-    }
-
-    // Draw data points
-    coords.forEach((coord, index) => {
-      const circle = document.createElementNS(svgNS, "circle");
-      circle.setAttribute("cx", coord.x.toString());
-      circle.setAttribute("cy", coord.y.toString());
-      circle.setAttribute("r", "1.2");
-      circle.setAttribute("fill", metric.color);
-      circle.style.cursor = "pointer";
-
-      const row = drawRows[index];
-      const value = metric.values[index];
-      const date = new Date(row.timestamp);
-
-      circle.addEventListener("mouseenter", (e) => {
-        const svgRect = svg.getBoundingClientRect();
-        const scaleX = svgRect.width / width;
-        const scaleY = svgRect.height / height;
-
-        circle.setAttribute("r", "1.4");
-        circle.setAttribute("stroke", "#ffd700");
-        circle.setAttribute("stroke-width", "0.5");
-
-        tooltip.innerHTML = `
-          <div style="font-weight: 600; margin-bottom: 2px;">${metric.name}</div>
-          <div>${formatNumber(value, 2)} ${metric.unit}</div>
-          <div style="color: var(--muted, #B0B0B0); font-size: 10px; margin-top: 2px;">${formatDateTime(date)}</div>
-        `;
-        tooltip.style.display = "block";
-
-        const x = svgRect.left + coord.x * scaleX;
-        const y = svgRect.top + coord.y * scaleY;
-        const tooltipRect = tooltip.getBoundingClientRect();
-        tooltip.style.left = `${x - tooltipRect.width / 2}px`;
-        tooltip.style.top = `${y - tooltipRect.height - 5}px`;
-      });
-
-      circle.addEventListener("mouseleave", () => {
-        circle.setAttribute("r", "1.2");
-        circle.removeAttribute("stroke");
-        circle.removeAttribute("stroke-width");
-        tooltip.style.display = "none";
-      });
-
-      svg.appendChild(circle);
+    renderLineChart("jitter-chart", rows.map(speedtestRowToTimeSeries), "jitter_ms", {
+      ...getChartPanOpts(value),
+      metricName: "Jitter",
+      metricUnit: "ms",
     });
-  });
-
-  // Add legend
-  const legendY = height - paddingBottom + 4;
-  let legendX = paddingLeft;
-  metrics.forEach((metric) => {
-    const legendGroup = document.createElementNS(svgNS, "g");
-
-    const circle = document.createElementNS(svgNS, "circle");
-    circle.setAttribute("cx", legendX.toString());
-    circle.setAttribute("cy", legendY.toString());
-    circle.setAttribute("r", "1.5");
-    circle.setAttribute("fill", metric.color);
-    legendGroup.appendChild(circle);
-
-    const text = document.createElementNS(svgNS, "text");
-    text.setAttribute("x", (legendX + 4).toString());
-    text.setAttribute("y", (legendY + 1).toString());
-    text.setAttribute("fill", "rgba(255,255,255,0.7)");
-    text.setAttribute("font-size", "2.5");
-    text.textContent = metric.name;
-    legendGroup.appendChild(text);
-
-    svg.appendChild(legendGroup);
-    legendX += metric.name.length * 3.5 + 8;
-  });
-
-  container.appendChild(svg);
-
-  if (usePan && options?.onPanChange) {
-    setupChartPan(container, options.onPanChange);
   }
 }
 
 async function updateCombinedChart(): Promise<void> {
   const select = $("range-combined") as HTMLSelectElement;
   const value = (select.value || "24h") as RangeKey;
-  // Save the range preference
   localStorage.setItem("chart-range-combined", value);
   const rows = await loadHistoryForRange(value);
   chartFullDataByRange[value] = rows;
-  renderCombinedChart("combined-chart", rows, value, getChartPanOpts(value));
+  renderCombinedChart(
+    "combined-chart",
+    rows.map(speedtestRowToTimeSeries),
+    SPEEDPLANE_COMBINED_SERIES,
+    getChartPanOpts(value),
+  );
 }
+
 
 /* ---------- SCHEDULES ---------- */
 

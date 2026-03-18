@@ -1,12 +1,15 @@
 module speedplane
 
-go 1.25.7
+go 1.24.2
 
 require (
 	github.com/gorilla/websocket v1.5.3
+	github.com/network-plane/planeweb-go v0.0.0-00010101000000-000000000000
 	github.com/showwin/speedtest-go v1.7.10
 	github.com/spf13/cobra v1.10.2
 )
+
+replace github.com/network-plane/planeweb-go => ../packages/planeweb-go
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
