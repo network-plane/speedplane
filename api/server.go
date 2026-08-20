@@ -17,6 +17,7 @@ import (
 
 	"speedplane/model"
 	"speedplane/scheduler"
+	"speedplane/speedtest"
 	"speedplane/storage"
 )
 
@@ -75,17 +76,24 @@ func (pt *progressTracker) removeSession(id string) {
 	}
 }
 
+// Preferences holds user-configurable settings persisted in speedplane.config.
+type Preferences struct {
+	SaveManualRuns bool   `json:"save_manual_runs"`
+	ServerCity     string `json:"server_city"`
+	ServerCountry  string `json:"server_country"`
+}
+
 // Server provides HTTP API endpoints for the speedplane application.
 type Server struct {
-	store        *storage.Store
-	runSpeedtest RunFunc
-	runWithProgress RunWithProgressFunc
-	sched        *scheduler.Scheduler
-	progress     *progressTracker
-	saveConfig   func()
-	getSaveManualRuns func() bool
-	setSaveManualRuns func(bool) error
-	wsManager    *WSConnectionManager
+	store             *storage.Store
+	runSpeedtest      RunFunc
+	runWithProgress   RunWithProgressFunc
+	sched             *scheduler.Scheduler
+	progress          *progressTracker
+	saveConfig        func()
+	getPreferences    func() Preferences
+	setPreferences    func(Preferences) error
+	wsManager         *WSConnectionManager
 }
 
 // runManual executes a speedtest for manual runs. Results are never saved automatically.
@@ -99,17 +107,17 @@ func (s *Server) runManualWithProgress(ctx context.Context, progress func(stage 
 }
 
 // NewServer creates a new API server with the given dependencies.
-func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithProgressFunc, sched *scheduler.Scheduler, saveConfig func(), getSaveManualRuns func() bool, setSaveManualRuns func(bool) error) *Server {
+func NewServer(store *storage.Store, runFn RunFunc, runWithProgressFn RunWithProgressFunc, sched *scheduler.Scheduler, saveConfig func(), getPreferences func() Preferences, setPreferences func(Preferences) error) *Server {
 	return &Server{
-		store:          store,
-		runSpeedtest:   runFn,
+		store:           store,
+		runSpeedtest:    runFn,
 		runWithProgress: runWithProgressFn,
-		sched:          sched,
-		progress:       newProgressTracker(),
-		saveConfig:     saveConfig,
-		getSaveManualRuns: getSaveManualRuns,
-		setSaveManualRuns: setSaveManualRuns,
-		wsManager:      NewWSConnectionManager(),
+		sched:           sched,
+		progress:        newProgressTracker(),
+		saveConfig:      saveConfig,
+		getPreferences:  getPreferences,
+		setPreferences:  setPreferences,
+		wsManager:       NewWSConnectionManager(),
 	}
 }
 
@@ -132,6 +140,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/export/current.json", s.handleExportCurrentJSON)
 	mux.HandleFunc("/api/export/current.csv", s.handleExportCurrentCSV)
 	mux.HandleFunc("/api/preferences", s.handlePreferences)
+	mux.HandleFunc("/api/speedtest/cities", s.handleSpeedtestCities)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 }
 
@@ -1040,42 +1049,54 @@ func (s *Server) handleExportCurrentCSV(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handlePreferences(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		saveManualRuns := false
-		if s.getSaveManualRuns != nil {
-			saveManualRuns = s.getSaveManualRuns()
+		prefs := Preferences{}
+		if s.getPreferences != nil {
+			prefs = s.getPreferences()
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"save_manual_runs": saveManualRuns,
-		})
+		writeJSON(w, http.StatusOK, prefs)
 
 	case http.MethodPut:
-		var req struct {
-			SaveManualRuns bool `json:"save_manual_runs"`
-		}
+		var req Preferences
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
 
-		if s.setSaveManualRuns == nil {
+		if s.setPreferences == nil {
 			http.Error(w, "preference update not configured", http.StatusInternalServerError)
 			return
 		}
 
-		if err := s.setSaveManualRuns(req.SaveManualRuns); err != nil {
+		if err := s.setPreferences(req); err != nil {
 			http.Error(w, "failed to update preference", http.StatusInternalServerError)
 			log.Printf("update preference: %v", err)
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"save_manual_runs": req.SaveManualRuns,
-		})
+		writeJSON(w, http.StatusOK, req)
 
 	default:
 		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPut)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) handleSpeedtestCities(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	result, err := speedtest.SearchCities(r.Context(), query)
+	if err != nil {
+		http.Error(w, "failed to fetch cities", http.StatusInternalServerError)
+		log.Printf("search cities: %v", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // ---------- WebSocket handler ----------
