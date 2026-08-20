@@ -13,13 +13,16 @@ import (
 
 // Config is the configuration for the Speedplane server
 type Config struct {
-    DataDir         string                    `json:"data_dir"`
-    DBPath          string                    `json:"db_path"`
-    ListenAddr      string                    `json:"listen_addr"`
-    PublicDashboard bool                      `json:"public_dashboard"`
-    SaveManualRuns  bool                      `json:"save_manual_runs"`
-    Schedules       []model.Schedule          `json:"schedules,omitempty"`
-    LastRun         map[string]time.Time      `json:"last_run,omitempty"`
+    DataDir         string               `json:"data_dir"`
+    DBPath          string               `json:"db_path"`
+    ListenAddr      string               `json:"listen_addr"`
+    PublicDashboard bool                 `json:"public_dashboard"`
+    SaveManualRuns  bool                 `json:"save_manual_runs"`
+    ServerCity      string               `json:"server_city,omitempty"`
+    ServerCountry   string               `json:"server_country,omitempty"`
+    ServerKeyword   string               `json:"server_keyword,omitempty"` // deprecated: use server_city
+    Schedules       []model.Schedule     `json:"schedules,omitempty"`
+    LastRun         map[string]time.Time `json:"last_run,omitempty"`
 }
 
 // Default returns a Config with default values.
@@ -94,6 +97,11 @@ func Load(configPath string) (Config, error) {
     }
     if cfg.LastRun == nil {
         cfg.LastRun = make(map[string]time.Time)
+    }
+
+    // Backwards compatibility: server_keyword was renamed to server_city.
+    if cfg.ServerCity == "" && cfg.ServerKeyword != "" {
+        cfg.ServerCity = cfg.ServerKeyword
     }
 
     return cfg, nil

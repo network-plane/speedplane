@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	st "github.com/showwin/speedtest-go/speedtest"
@@ -14,36 +15,54 @@ import (
 	"speedplane/model"
 )
 
-// Runner executes speed tests and returns results.
-// Note: A fresh speedtest client is created for each run to prevent memory leaks.
-// The speedtest-go library accumulates internal buffers when reusing clients.
-type Runner struct{}
+// Options configures how speed tests select servers and run.
+type Options struct {
+	ServerCity    string
+	ServerCountry string
+}
 
-// NewRunner creates a new speedtest runner instance.
-func NewRunner() *Runner {
-	return &Runner{}
+// Runner executes speed tests and returns results.
+type Runner struct {
+	getOpts func() Options
+}
+
+// NewRunner creates a runner that reads options via getOpts before each test.
+func NewRunner(getOpts func() Options) *Runner {
+	return &Runner{getOpts: getOpts}
+}
+
+func (r *Runner) opts() Options {
+	if r.getOpts != nil {
+		return r.getOpts()
+	}
+	return Options{}
 }
 
 // Run executes a complete speed test including ping, download, and upload tests.
-// It returns a SpeedtestResult with all the test metrics.
 func (r *Runner) Run(ctx context.Context) (*model.SpeedtestResult, error) {
 	return r.RunWithProgress(ctx, func(_ string, _ string) {})
 }
 
 // RunWithProgress executes a speed test with progress callbacks.
-// If progress is nil, it behaves like Run().
 func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string, message string)) (*model.SpeedtestResult, error) {
 	if progress == nil {
 		progress = func(_ string, _ string) {}
 	}
 
+	opts := r.opts()
+	city := strings.TrimSpace(opts.ServerCity)
+	if city == "" {
+		return nil, fmt.Errorf("no server city selected; choose a city in Preferences")
+	}
+	country := strings.TrimSpace(opts.ServerCountry)
+	if country == "" {
+		return nil, fmt.Errorf("no server country selected; choose a city and country in Preferences")
+	}
+
 	progress("init", "Starting speedtest...")
 
-	// Create a fresh client for each speedtest run to prevent memory leaks.
-	// The speedtest-go library accumulates buffers internally when clients are reused.
-	client := st.New()
+	client := st.New(st.WithUserConfig(&st.UserConfig{Keyword: city}))
 
-	// Fetch user info
 	progress("user", "Fetching user info...")
 	user, err := client.FetchUserInfoContext(ctx)
 	if err != nil {
@@ -51,69 +70,137 @@ func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string
 	}
 	progress("user", fmt.Sprintf("Connected from %s (%s)", user.IP, user.Isp))
 
-	// Fetch server list
-	progress("servers", "Fetching server list...")
+	progress("servers", fmt.Sprintf("Fetching servers in %s%s...", city, locationLabel(country)))
 	servers, err := client.FetchServerListContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch server list: %w", err)
 	}
-
 	if len(servers) == 0 {
 		return nil, fmt.Errorf("no servers available")
 	}
 
-	progress("servers", fmt.Sprintf("Found %d servers, selecting closest...", len(servers)))
-	// Select the first server (closest by default)
-	target := servers[0]
-	progress("servers", fmt.Sprintf("Selected server: %s (%s)", target.Name, target.Country))
-
-	// Test ping/latency
-	progress("ping", "Testing ping and latency...")
-	err = target.PingTestContext(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("ping test: %w", err)
+	targets := rankServersByLocation(servers, city, country)
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("no servers found in %q%s", city, locationLabel(country))
 	}
-	// Convert latency from Duration to milliseconds
+
+	progress("servers", fmt.Sprintf("Found %d server(s) in %s%s", len(targets), city, locationLabel(country)))
+
+	var lastResult *model.SpeedtestResult
+	for attempt, target := range targets {
+		if attempt > 0 {
+			client.Reset()
+			progress("servers", fmt.Sprintf("Trying next server (%d/%d)...", attempt+1, len(targets)))
+		}
+		progress("servers", fmt.Sprintf("Testing server: %s (%s) [ID %s] - %.1f km",
+			target.Name, target.Country, target.ID, target.Distance))
+
+		result, downloadMbps, err := testServer(ctx, user, target, progress)
+		if err != nil {
+			log.Printf("[speedtest] Server %s (%s) failed: %v", target.Name, target.ID, err)
+			continue
+		}
+		lastResult = result
+
+		if downloadMbps > 0 {
+			if attempt > 0 {
+				log.Printf("[speedtest] Succeeded on attempt %d with server %s (%s)", attempt+1, target.Name, target.ID)
+			}
+			return result, nil
+		}
+
+		log.Printf("[speedtest] Server %s (%s) reported 0 download, trying next", target.Name, target.ID)
+	}
+
+	if lastResult != nil {
+		return lastResult, nil
+	}
+
+	return nil, fmt.Errorf("no working servers found in %q%s (all failed or returned 0 download)", city, locationLabel(country))
+}
+
+func locationLabel(country string) string {
+	country = strings.TrimSpace(country)
+	if country == "" {
+		return ""
+	}
+	return ", " + country
+}
+
+func rankServersByLocation(servers st.Servers, city, country string) st.Servers {
+	locationServers := filterByLocation(servers, city, country)
+	if len(locationServers) == 0 {
+		return nil
+	}
+
+	if available := locationServers.Available(); available.Len() > 0 {
+		return *available
+	}
+
+	return locationServers
+}
+
+func filterByLocation(servers st.Servers, city, country string) st.Servers {
+	city = strings.TrimSpace(city)
+	if city == "" {
+		return nil
+	}
+	country = strings.TrimSpace(country)
+
+	filtered := make(st.Servers, 0, len(servers))
+	for _, s := range servers {
+		if !strings.EqualFold(strings.TrimSpace(s.Name), city) {
+			continue
+		}
+		if country != "" && !strings.EqualFold(strings.TrimSpace(s.Country), country) {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	return filtered
+}
+
+func testServer(
+	ctx context.Context,
+	user *st.User,
+	target *st.Server,
+	progress func(stage string, message string),
+) (*model.SpeedtestResult, float64, error) {
+	progress("ping", "Testing ping and latency...")
+	if err := target.PingTestContext(ctx, nil); err != nil {
+		return nil, 0, fmt.Errorf("ping test: %w", err)
+	}
+
 	pingMs := target.Latency.Seconds() * 1000.0
 	jitterMs := target.Jitter.Seconds() * 1000.0
 	progress("ping", fmt.Sprintf("Ping: %.1f ms, Jitter: %.1f ms", pingMs, jitterMs))
 
-	// Test download
 	progress("download", "Testing download speed...")
-	err = target.DownloadTestContext(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("download test: %w", err)
+	if err := target.DownloadTestContext(ctx); err != nil {
+		return nil, 0, fmt.Errorf("download test: %w", err)
 	}
-	// Convert results using the library's Mbps() method
-	// ByteRate represents bits per second, and Mbps() converts to Mbps
 	downloadMbps := target.DLSpeed.Mbps()
 	progress("download", fmt.Sprintf("Download: %.2f Mbps", downloadMbps))
 
-	// Test upload
+	if downloadMbps <= 0 {
+		return nil, 0, fmt.Errorf("download speed is 0")
+	}
+
 	progress("upload", "Testing upload speed...")
-	err = target.UploadTestContext(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("upload test: %w", err)
+	if err := target.UploadTestContext(ctx); err != nil {
+		return nil, downloadMbps, fmt.Errorf("upload test: %w", err)
 	}
 	uploadMbps := target.ULSpeed.Mbps()
 	progress("upload", fmt.Sprintf("Upload: %.2f Mbps", uploadMbps))
 
 	progress("processing", "Processing results...")
 
-	// Debug output
-	log.Printf("[speedtest] Raw DLSpeed: %.2f (ByteRate), Mbps(): %.2f", float64(target.DLSpeed), target.DLSpeed.Mbps())
-	log.Printf("[speedtest] Raw ULSpeed: %.2f (ByteRate), Mbps(): %.2f", float64(target.ULSpeed), target.ULSpeed.Mbps())
-	log.Printf("[speedtest] Latency: %v, Jitter: %v", target.Latency, target.Jitter)
-	log.Printf("[speedtest] Server: %s (%s) - ID: %s", target.Name, target.Country, target.ID)
-	log.Printf("[speedtest] User IP: %s, ISP: %s", user.IP, user.Isp)
+	log.Printf("[speedtest] Server: %s (%s) - ID: %s, Distance: %.1f km", target.Name, target.Country, target.ID, target.Distance)
+	log.Printf("[speedtest] Results - Download: %.2f Mbps, Upload: %.2f Mbps, Ping: %.2f ms",
+		downloadMbps, uploadMbps, pingMs)
 
-	// Get packet loss percentage
 	packetLossPct := target.PacketLoss.LossPercent()
 
-	log.Printf("[speedtest] Results - Download: %.2f Mbps, Upload: %.2f Mbps, Ping: %.2f ms, Jitter: %.2f ms, Packet Loss: %.2f%%",
-		downloadMbps, uploadMbps, pingMs, jitterMs, packetLossPct)
-
-	// Build result JSON for RawJSON field
 	resultJSON := map[string]interface{}{
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"ping": map[string]interface{}{
@@ -141,10 +228,10 @@ func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string
 
 	rawJSON, err := json.Marshal(resultJSON)
 	if err != nil {
-		return nil, fmt.Errorf("marshal result json: %w", err)
+		return nil, downloadMbps, fmt.Errorf("marshal result json: %w", err)
 	}
 
-	res := &model.SpeedtestResult{
+	result := &model.SpeedtestResult{
 		ID:            generateID(),
 		Timestamp:     time.Now().UTC(),
 		DownloadMbps:  downloadMbps,
@@ -160,7 +247,7 @@ func (r *Runner) RunWithProgress(ctx context.Context, progress func(stage string
 		RawJSON:       rawJSON,
 	}
 
-	return res, nil
+	return result, downloadMbps, nil
 }
 
 func generateID() string {

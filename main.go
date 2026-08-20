@@ -39,7 +39,7 @@ var (
 	listen     string
 	listenPort int
 	public     bool
-	appVersion = "1.1.39"
+	appVersion = "1.1.43"
 )
 
 var rootCmd = &cobra.Command{
@@ -130,7 +130,12 @@ func run(cmd *cobra.Command, args []string) {
 		cfg.LastRun = make(map[string]time.Time)
 	}
 
-	runner := speedtest.NewRunner()
+	runner := speedtest.NewRunner(func() speedtest.Options {
+		return speedtest.Options{
+			ServerCity:    cfg.ServerCity,
+			ServerCountry: cfg.ServerCountry,
+		}
+	})
 
 	runAndSave := func(ctx context.Context) (*model.SpeedtestResult, error) {
 		res, err := runner.Run(ctx)
@@ -184,18 +189,22 @@ func run(cmd *cobra.Command, args []string) {
 		return runner.RunWithProgress(ctx, progress)
 	}
 
-	// Getter function for SaveManualRuns preference
-	getSaveManualRuns := func() bool {
-		return cfg.SaveManualRuns
+	getPreferences := func() api.Preferences {
+		return api.Preferences{
+			SaveManualRuns: cfg.SaveManualRuns,
+			ServerCity:     cfg.ServerCity,
+			ServerCountry:  cfg.ServerCountry,
+		}
 	}
 
-	// Setter function for SaveManualRuns preference
-	setSaveManualRuns := func(value bool) error {
-		cfg.SaveManualRuns = value
+	setPreferences := func(prefs api.Preferences) error {
+		cfg.SaveManualRuns = prefs.SaveManualRuns
+		cfg.ServerCity = prefs.ServerCity
+		cfg.ServerCountry = prefs.ServerCountry
 		return config.Save(cfg)
 	}
 
-	apiServer := api.NewServer(store, runWithoutSave, runWithProgressWithoutSave, sched, saveConfig, getSaveManualRuns, setSaveManualRuns)
+	apiServer := api.NewServer(store, runWithoutSave, runWithProgressWithoutSave, sched, saveConfig, getPreferences, setPreferences)
 
 	// Broadcast when scheduled speedtests complete
 	sched.SetOnComplete(func(result *model.SpeedtestResult) {
