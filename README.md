@@ -55,9 +55,31 @@ Create a `speedplane.config` file:
   "data_dir": "/path/to/data",
   "db_path": "/path/to/database.results",
   "listen_addr": ":8080",
-  "public_dashboard": false
+  "public_dashboard": false,
+  "server_city": "Berlin",
+  "server_country": "Germany"
 }
 ```
+
+### Speedtest Server Selection
+
+Choose your test location in **Preferences → Speedtest → Test server location**. The list includes every Ookla server city worldwide, grouped by country.
+
+Speedplane will:
+
+- Only use servers in the selected city **and** country
+- Try the next server in the same location if one fails or returns 0 download
+
+You can also set the location in `speedplane.config`:
+
+```json
+{
+  "server_city": "Berlin",
+  "server_country": "Germany"
+}
+```
+
+Available locations are searched via Ookla's global server API: `GET /api/speedtest/cities?q=Berlin`. Leave `q` empty for nearby suggestions.
 
 ### Command-Line Flags
 
