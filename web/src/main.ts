@@ -249,31 +249,92 @@ type HistoryPageResponse = {
   total: number;
 };
 
+type HistoryColumnKey =
+  | "id"
+  | "timestamp"
+  | "download_mbps"
+  | "upload_mbps"
+  | "ping_ms"
+  | "jitter_ms"
+  | "packet_loss_pct"
+  | "external_ip"
+  | "isp"
+  | "server";
+
+type SortDirection = "asc" | "desc";
+
+type HistorySortColumn = {
+  key: HistoryColumnKey;
+  direction: SortDirection;
+};
+
+const MAX_HISTORY_SORT_COLUMNS = 3;
+
 let historyCurrentPage = 1;
 let historyTotal = 0;
 let historyPerPage = 100;
+let historySortColumns: HistorySortColumn[] = [];
+let historyAllRowsCache: SpeedtestResult[] | null = null;
+
+function invalidateHistoryCache(): void {
+  historyAllRowsCache = null;
+}
 
 function getHistoryPageCount(): number {
   if (historyPerPage <= 0) return 1;
   return Math.max(1, Math.ceil(historyTotal / historyPerPage));
 }
 
-async function loadHistoryTable(): Promise<void> {
-  const perPage = historyPerPage;
-  const offset = (historyCurrentPage - 1) * perPage;
-  const url = `/api/history?range=all&limit=${perPage}&offset=${offset}`;
+function getServerSortValue(r: SpeedtestResult): string {
+  return [r.server_name, r.server_country, r.server_id].filter(Boolean).join(" ").toLowerCase();
+}
 
-  const data = await fetchJSON<HistoryPageResponse>(url);
-  const rows = data.results;
-  historyTotal = data.total;
-
-  // If current page is beyond last page (e.g. after delete), go to last page and refetch
-  const totalPages = getHistoryPageCount();
-  if (totalPages >= 1 && historyCurrentPage > totalPages) {
-    historyCurrentPage = totalPages;
-    return loadHistoryTable();
+function getColumnSortValue(r: SpeedtestResult, key: HistoryColumnKey): string | number {
+  switch (key) {
+    case "id":
+      return r.id.toLowerCase();
+    case "timestamp":
+      return new Date(r.timestamp).getTime();
+    case "download_mbps":
+      return r.download_mbps ?? 0;
+    case "upload_mbps":
+      return r.upload_mbps ?? 0;
+    case "ping_ms":
+      return r.ping_ms ?? 0;
+    case "jitter_ms":
+      return r.jitter_ms ?? 0;
+    case "packet_loss_pct": {
+      const value = r.packet_loss_pct ?? -1;
+      return value < 0 ? Number.POSITIVE_INFINITY : value;
+    }
+    case "external_ip":
+      return (r.external_ip || "").toLowerCase();
+    case "isp":
+      return (r.isp || "").toLowerCase();
+    case "server":
+      return getServerSortValue(r);
   }
+}
 
+function compareSortValues(a: string | number, b: string | number): number {
+  if (typeof a === "number" && typeof b === "number") {
+    if (a === b) return 0;
+    return a < b ? -1 : 1;
+  }
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function compareHistoryRows(a: SpeedtestResult, b: SpeedtestResult): number {
+  for (const sort of historySortColumns) {
+    const cmp = compareSortValues(getColumnSortValue(a, sort.key), getColumnSortValue(b, sort.key));
+    if (cmp !== 0) {
+      return sort.direction === "asc" ? cmp : -cmp;
+    }
+  }
+  return 0;
+}
+
+function renderHistoryTableBody(rows: SpeedtestResult[]): void {
   const tbody = $("history-table").querySelector("tbody");
   if (!tbody) return;
   tbody.innerHTML = "";
@@ -305,9 +366,7 @@ async function loadHistoryTable(): Promise<void> {
     tbody.appendChild(tr);
   }
 
-  // Attach delete event listeners
-  const deleteButtons = tbody.querySelectorAll(".delete-result-btn");
-  deleteButtons.forEach((btn) => {
+  tbody.querySelectorAll(".delete-result-btn").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       const button = e.target as HTMLButtonElement;
       const id = button.getAttribute("data-result-id");
@@ -316,9 +375,94 @@ async function loadHistoryTable(): Promise<void> {
       }
     });
   });
+}
 
-  // Update pagination controls
+function updateHistorySortHeaders(): void {
+  const headers = document.querySelectorAll<HTMLTableCellElement>("#history-table thead th[data-sort-key]");
+  headers.forEach((th) => {
+    const key = th.getAttribute("data-sort-key") as HistoryColumnKey;
+    const sortIndex = historySortColumns.findIndex((sort) => sort.key === key);
+    th.classList.toggle("sortable-active", sortIndex >= 0);
+    th.removeAttribute("data-sort-direction");
+    th.removeAttribute("data-sort-priority");
+    th.title = "Click to sort: ascending → descending → reset";
+    if (sortIndex >= 0) {
+      const sort = historySortColumns[sortIndex];
+      th.setAttribute("data-sort-direction", sort.direction);
+      th.setAttribute("data-sort-priority", String(sortIndex + 1));
+      th.title = `Sorted ${sort.direction} (priority ${sortIndex + 1}). Click to change.`;
+    }
+  });
+}
+
+function cycleHistorySort(key: HistoryColumnKey): void {
+  const sortIndex = historySortColumns.findIndex((sort) => sort.key === key);
+  if (sortIndex === -1) {
+    if (historySortColumns.length >= MAX_HISTORY_SORT_COLUMNS) {
+      historySortColumns.shift();
+    }
+    historySortColumns.push({ key, direction: "asc" });
+  } else if (historySortColumns[sortIndex].direction === "asc") {
+    historySortColumns[sortIndex] = { key, direction: "desc" };
+  } else {
+    historySortColumns.splice(sortIndex, 1);
+  }
+
+  historyCurrentPage = 1;
+  if (historySortColumns.length === 0) {
+    historyAllRowsCache = null;
+  }
+
+  loadHistoryTable().catch((err) => console.error("loadHistoryTable", err));
+}
+
+async function loadHistoryTable(): Promise<void> {
+  let rows: SpeedtestResult[];
+
+  if (historySortColumns.length > 0) {
+    if (!historyAllRowsCache) {
+      historyAllRowsCache = await fetchJSON<SpeedtestResult[]>("/api/history?range=all");
+    }
+
+    const sorted = [...historyAllRowsCache].sort(compareHistoryRows);
+    historyTotal = sorted.length;
+
+    const totalPages = getHistoryPageCount();
+    if (totalPages >= 1 && historyCurrentPage > totalPages) {
+      historyCurrentPage = totalPages;
+    }
+
+    const offset = (historyCurrentPage - 1) * historyPerPage;
+    rows = sorted.slice(offset, offset + historyPerPage);
+  } else {
+    const perPage = historyPerPage;
+    const offset = (historyCurrentPage - 1) * perPage;
+    const url = `/api/history?range=all&limit=${perPage}&offset=${offset}`;
+    const data = await fetchJSON<HistoryPageResponse>(url);
+    rows = data.results;
+    historyTotal = data.total;
+
+    const totalPages = getHistoryPageCount();
+    if (totalPages >= 1 && historyCurrentPage > totalPages) {
+      historyCurrentPage = totalPages;
+      return loadHistoryTable();
+    }
+  }
+
+  renderHistoryTableBody(rows);
+  updateHistorySortHeaders();
   updateHistoryPagination();
+}
+
+function setupHistorySorting(): void {
+  const headers = document.querySelectorAll<HTMLTableCellElement>("#history-table thead th[data-sort-key]");
+  headers.forEach((th) => {
+    th.addEventListener("click", () => {
+      const key = th.getAttribute("data-sort-key") as HistoryColumnKey;
+      cycleHistorySort(key);
+    });
+  });
+  updateHistorySortHeaders();
 }
 
 function updateHistoryPagination(): void {
@@ -399,6 +543,7 @@ async function deleteResult(id: string): Promise<void> {
     }
 
     // Reload the history table and refresh charts
+    invalidateHistoryCache();
     const isCombinedGraph = localStorage.getItem("combined-graph") === "true";
     const chartPromises = isCombinedGraph
       ? [updateCombinedChart()]
@@ -1898,6 +2043,7 @@ function setupRunNow(): void {
 
       // Refresh data if result was saved
       if (saved) {
+        invalidateHistoryCache();
         await Promise.all([
           loadSummary(),
           loadHistoryTable(),
@@ -2491,33 +2637,226 @@ function setupCombinedGraphPreference(): void {
   }
 }
 
-function setupSaveManualRunsPreference(): void {
+type Preferences = {
+  save_manual_runs: boolean;
+  server_city: string;
+  server_country: string;
+};
+
+type CityLocation = {
+  city: string;
+  country: string;
+};
+
+let cachedPreferences: Preferences = {
+  save_manual_runs: false,
+  server_city: "",
+  server_country: "",
+};
+
+async function loadPreferences(): Promise<Preferences> {
+  const data = await fetchJSON<Preferences>("/api/preferences");
+  cachedPreferences = {
+    save_manual_runs: data.save_manual_runs ?? false,
+    server_city: data.server_city ?? "",
+    server_country: data.server_country ?? "",
+  };
+  updateSelectedLocationSummary(cachedPreferences);
+  return cachedPreferences;
+}
+
+async function savePreferences(update: Partial<Preferences>): Promise<Preferences> {
+  const next = { ...cachedPreferences, ...update };
+  const saved = await fetchJSON<Preferences>("/api/preferences", {
+    method: "PUT",
+    body: JSON.stringify(next),
+  });
+  cachedPreferences = {
+    save_manual_runs: saved.save_manual_runs ?? false,
+    server_city: saved.server_city ?? "",
+    server_country: saved.server_country ?? "",
+  };
+  updateSelectedLocationSummary(cachedPreferences);
+  return cachedPreferences;
+}
+
+function formatLocationLabel(city: string, country: string): string {
+  if (!city) return "No location selected";
+  return country ? `${city}, ${country}` : city;
+}
+
+function updateSelectedLocationSummary(prefs: Preferences): void {
+  const summary = document.getElementById("pref-server-city-selected");
+  if (!summary) return;
+  summary.textContent = prefs.server_city
+    ? `Selected: ${formatLocationLabel(prefs.server_city, prefs.server_country)}`
+    : "No location selected";
+}
+
+type CitiesSearchResponse = {
+  query?: string;
+  detected_country?: string;
+  source?: "search" | "nearby";
+  locations: CityLocation[];
+};
+
+let citySearchTimer: number | null = null;
+
+function renderLocationResults(
+  container: HTMLElement,
+  locations: CityLocation[],
+  selected: Preferences,
+  heading: string,
+  onSelect: (location: CityLocation) => void,
+): void {
+  container.innerHTML = "";
+
+  if (locations.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "location-results-empty";
+    empty.textContent = heading || "No locations found.";
+    container.appendChild(empty);
+    return;
+  }
+
+  if (heading) {
+    const label = document.createElement("div");
+    label.className = "location-results-label";
+    label.textContent = heading;
+    container.appendChild(label);
+  }
+
+  for (const location of locations) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "location-result";
+    button.textContent = formatLocationLabel(location.city, location.country);
+    if (
+      location.city === selected.server_city &&
+      location.country === selected.server_country
+    ) {
+      button.classList.add("selected");
+    }
+    button.addEventListener("click", () => onSelect(location));
+    container.appendChild(button);
+  }
+}
+
+async function fetchCityLocations(query: string): Promise<CitiesSearchResponse> {
+  const params = new URLSearchParams();
+  if (query.trim()) {
+    params.set("q", query.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJSON<CitiesSearchResponse>(`/api/speedtest/cities${suffix}`);
+}
+
+async function setupSpeedtestPreferences(): Promise<void> {
+  const citySearch = $("pref-server-city-search") as HTMLInputElement;
+  const cityResults = $("pref-server-city-results") as HTMLElement;
   const checkbox = $("pref-save-manual-runs") as HTMLInputElement;
 
-  // Load preference from server
-  fetchJSON<{ save_manual_runs: boolean }>("/api/preferences")
-    .then((data) => {
-      checkbox.checked = data.save_manual_runs;
-    })
-    .catch((err) => {
-      console.error("Failed to load save manual runs preference:", err);
-      checkbox.checked = false; // Default to false
-    });
+  let prefs: Preferences;
+  try {
+    prefs = await loadPreferences();
+    checkbox.checked = prefs.save_manual_runs;
+  } catch (err) {
+    console.error("Failed to load preferences:", err);
+    checkbox.checked = false;
+    prefs = cachedPreferences;
+  }
 
-  // Save preference when changed
-  checkbox.addEventListener("change", async () => {
+  const selectLocation = async (location: CityLocation): Promise<void> => {
+    const previous = { ...cachedPreferences };
     try {
-      await fetchJSON("/api/preferences", {
-        method: "PUT",
-        body: JSON.stringify({
-          save_manual_runs: checkbox.checked,
-        }),
+      await savePreferences({
+        server_city: location.city,
+        server_country: location.country,
       });
+      renderLocationResults(
+        cityResults,
+        cityResults.dataset.lastResults ? JSON.parse(cityResults.dataset.lastResults) : [location],
+        cachedPreferences,
+        cityResults.dataset.lastHeading ?? "",
+        selectLocation,
+      );
+    } catch (err) {
+      console.error("Failed to save server location:", err);
+      alert("Failed to save location preference. Please try again.");
+      updateSelectedLocationSummary(previous);
+    }
+  };
+
+  const runCitySearch = async (query: string): Promise<void> => {
+    try {
+      const data = await fetchCityLocations(query);
+      const heading =
+        data.source === "nearby"
+          ? data.detected_country
+            ? `Nearby (${data.detected_country})`
+            : "Nearby"
+          : data.locations.length > 0
+            ? `Results for "${query}"`
+            : "";
+
+      cityResults.dataset.lastResults = JSON.stringify(data.locations);
+      cityResults.dataset.lastHeading = heading;
+      renderLocationResults(cityResults, data.locations, cachedPreferences, heading, selectLocation);
+
+      if (data.detected_country && !query.trim()) {
+        citySearch.placeholder = `Search city or country (near ${data.detected_country})...`;
+      }
+    } catch (err) {
+      console.error("Failed to search cities:", err);
+      cityResults.innerHTML = "";
+      const empty = document.createElement("div");
+      empty.className = "location-results-empty";
+      empty.textContent = "Failed to load locations. Try again.";
+      cityResults.appendChild(empty);
+    }
+  };
+
+  if (prefs.server_city && !prefs.server_country) {
+    await runCitySearch(prefs.server_city);
+    const matches = cityResults.dataset.lastResults
+      ? (JSON.parse(cityResults.dataset.lastResults) as CityLocation[]).filter(
+          (loc) => loc.city.localeCompare(prefs.server_city, undefined, { sensitivity: "accent" }) === 0,
+        )
+      : [];
+    if (matches.length === 1) {
+      await savePreferences({
+        server_city: matches[0].city,
+        server_country: matches[0].country,
+      });
+    }
+  } else {
+    await runCitySearch("");
+  }
+
+  citySearch.addEventListener("input", () => {
+    if (citySearchTimer !== null) {
+      window.clearTimeout(citySearchTimer);
+    }
+
+    const query = citySearch.value.trim();
+    if (query.length < 2) {
+      runCitySearch("").catch((err) => console.error(err));
+      return;
+    }
+
+    citySearchTimer = window.setTimeout(() => {
+      runCitySearch(query).catch((err) => console.error(err));
+    }, 300);
+  });
+
+  checkbox.addEventListener("change", async () => {
+    const previous = cachedPreferences.save_manual_runs;
+    try {
+      await savePreferences({ save_manual_runs: checkbox.checked });
     } catch (err) {
       console.error("Failed to save save manual runs preference:", err);
       alert("Failed to save preference. Please try again.");
-      // Revert checkbox state
-      checkbox.checked = !checkbox.checked;
+      checkbox.checked = previous;
     }
   });
 }
@@ -2641,6 +2980,7 @@ function connectWebSocket(): void {
                 updateLatencyChart(),
                 updateJitterChart(),
               ];
+          invalidateHistoryCache();
           Promise.all([
             loadSummary(),
             loadHistoryTable(),
@@ -2681,9 +3021,10 @@ async function init(): Promise<void> {
   setupScheduleForm();
   setupRangeSelectors();
   setupHistoryPagination();
+  setupHistorySorting();
   setupThemeSelection();
   setupCombinedGraphPreference();
-  setupSaveManualRunsPreference();
+  setupSpeedtestPreferences().catch((err) => console.error(err));
   startScheduleTimer();
   connectWebSocket();
 

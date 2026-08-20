@@ -150,6 +150,78 @@
     .chart-toggle.active .chart-toggle-slider{
       transform:translateX(22px);
     }
+    .table th.sortable-th{
+      cursor:pointer;
+      user-select:none;
+      white-space:nowrap;
+    }
+    .table th.sortable-th:hover{
+      color:var(--accent);
+    }
+    .table th.sortable-th::after{
+      content:" ⇅";
+      font-size:11px;
+      color:var(--muted);
+      opacity:.45;
+    }
+    .table th.sortable-th.sortable-active::after{
+      opacity:1;
+      color:var(--accent);
+    }
+    .table th.sortable-th[data-sort-direction="asc"]::after{
+      content:" ↑" attr(data-sort-priority);
+    }
+    .table th.sortable-th[data-sort-direction="desc"]::after{
+      content:" ↓" attr(data-sort-priority);
+    }
+    #pref-server-city-search{
+      width:100%;
+    }
+    .location-results{
+      margin-top:8px;
+      max-height:240px;
+      overflow-y:auto;
+      border:1px solid var(--border);
+      border-radius:4px;
+      background:var(--panel2);
+    }
+    .location-results-empty{
+      padding:12px;
+      color:var(--muted);
+      font-size:13px;
+    }
+    .location-result{
+      display:block;
+      width:100%;
+      text-align:left;
+      padding:10px 12px;
+      border:none;
+      border-bottom:1px solid var(--border);
+      background:transparent;
+      color:var(--txt);
+      font-size:13px;
+      cursor:pointer;
+    }
+    .location-result:last-child{
+      border-bottom:none;
+    }
+    .location-result:hover,
+    .location-result.selected{
+      background:rgba(255,255,255,.06);
+      color:var(--accent);
+    }
+    .location-results-label{
+      padding:8px 12px 4px;
+      font-size:11px;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+    #pref-server-city-selected{
+      margin-top:8px;
+      color:var(--txt);
+      font-size:13px;
+    }
   </style>
 </head>
 <body>
@@ -382,16 +454,16 @@
           <table class="table" id="history-table" style="width: 100%;">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Date/time</th>
-                <th>Download (Mbps)</th>
-                <th>Upload (Mbps)</th>
-                <th>Ping (ms)</th>
-                <th>Jitter (ms)</th>
-                <th>Packet Loss (%)</th>
-                <th>IP Address</th>
-                <th>ISP</th>
-                <th>Server</th>
+                <th class="sortable-th" data-sort-key="id">ID</th>
+                <th class="sortable-th" data-sort-key="timestamp">Date/time</th>
+                <th class="sortable-th" data-sort-key="download_mbps">Download (Mbps)</th>
+                <th class="sortable-th" data-sort-key="upload_mbps">Upload (Mbps)</th>
+                <th class="sortable-th" data-sort-key="ping_ms">Ping (ms)</th>
+                <th class="sortable-th" data-sort-key="jitter_ms">Jitter (ms)</th>
+                <th class="sortable-th" data-sort-key="packet_loss_pct">Packet Loss (%)</th>
+                <th class="sortable-th" data-sort-key="external_ip">IP Address</th>
+                <th class="sortable-th" data-sort-key="isp">ISP</th>
+                <th class="sortable-th" data-sort-key="server">Server</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -449,6 +521,17 @@
             <div class="panel-title">Speedtest</div>
           </div>
           <div class="form">
+            <div class="form-row">
+              <div class="form-field">
+                <label for="pref-server-city-search">Test server location</label>
+                <input type="search" id="pref-server-city-search" placeholder="Search city or country (e.g. Athens, Berlin, Tokyo)..." autocomplete="off" />
+                <div id="pref-server-city-results" class="location-results">
+                  <div class="location-results-empty">Type at least 2 characters to search worldwide.</div>
+                </div>
+                <div id="pref-server-city-selected" class="form-hint"></div>
+                <div class="form-hint">Search Ookla's global server list. Only servers in the selected city and country are used for tests.</div>
+              </div>
+            </div>
             <div class="form-row">
               <div class="form-field">
                 <label style="display: flex; align-items: center; gap: 8px;">
