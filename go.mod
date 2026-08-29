@@ -1,12 +1,13 @@
 module speedplane
 
-go 1.24.2
+go 1.27.0
 
 require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/network-plane/planeweb-go v0.0.0-00010101000000-000000000000
 	github.com/showwin/speedtest-go v1.7.10
 	github.com/spf13/cobra v1.10.2
+	modernc.org/sqlite v1.43.0
 )
 
 replace github.com/network-plane/planeweb-go => ../packages/planeweb-go
@@ -24,5 +25,4 @@ require (
 	modernc.org/libc v1.66.10 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.43.0 // indirect
 )
