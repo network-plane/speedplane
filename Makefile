@@ -5,6 +5,7 @@ WEB_SRC     := web/src
 WEB_DIST    := web/dist
 JS_ENTRY    := $(WEB_SRC)/main.ts
 JS_BUNDLE   := $(WEB_DIST)/main.js
+PLANEWEB_SRC := $(wildcard ../packages/planeweb/src/*.ts ../packages/planeweb/src/charts/*.ts)
 
 BIN_NAME    := speedplane
 CMD_DIR     := ./
@@ -17,7 +18,7 @@ build: frontend backend
 
 frontend: $(JS_BUNDLE) $(WEB_DIST)/index.html
 
-$(JS_BUNDLE): $(JS_ENTRY)
+$(JS_BUNDLE): $(JS_ENTRY) $(PLANEWEB_SRC)
 	mkdir -p $(WEB_DIST)
 	$(ESBUILD) $(JS_ENTRY) --bundle --outfile=$(JS_BUNDLE) --sourcemap
 
